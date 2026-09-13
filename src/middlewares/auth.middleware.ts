@@ -36,6 +36,9 @@ export const authenticate = (
     }
 };
 
+
+
+
 export const authorize = (...allowedRoles: string[]) => {
     return (req: AuthRequest, res: Response, next: NextFunction) => {
         if (!req.user || !allowedRoles.includes(req.user.role)) {
@@ -44,5 +47,6 @@ export const authorize = (...allowedRoles: string[]) => {
             });
         }
         next();
+        // This comment is to indicate that the next() function is called to proceed to the next middleware or route handler
     };
 };
