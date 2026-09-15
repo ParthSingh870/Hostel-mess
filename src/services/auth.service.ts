@@ -5,7 +5,7 @@ import { RegisterInput, LoginInput } from '../validators/auth.validator.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'default_secret';
 
-export const registerUser = async (data: RegisterInput) => {
+export const registerUser = async (data: RegisterInput) => { //registerUser ek function hai jo data naam ka input lega, aur us data ka structure RegisterInput (jo auth.validator.js mein define hai) jaisa hona chahiye.
     const existingUser = await prisma.user.findUnique({
         where: { email: data.email },
     });
