@@ -1,11 +1,12 @@
 import { Request, Response } from 'express';
 import { registerSchema, loginSchema } from '../validators/auth.validator.js';
 import * as authService from '../services/auth.service.js';
+import { AuthRequest } from '../middlewares/auth.middleware.js';
 
 export const register = async (req: Request, res: Response) => {
     try {
         const validatedData = registerSchema.parse(req.body);//agr zod validation ke through data valid hai toh validatedData mein woh data aa jayega, warna error throw hoga.
-        const user = await authService.registerUser(validatedData);//registerUser ko jo data milega, kya woh RegisterInput(auth.validator.js me ka) ke according hai?"
+        const user = await authService.registerUser(validatedData);//registerUser ko jo data milega, kya woh RegisterInput(auth.validator.js) ke according hai?"
 
         return res.status(201).json({
             message: 'User registered successfully',
@@ -30,6 +31,32 @@ export const login = async (req: Request, res: Response) => {
     } catch (error: any) {
         return res.status(400).json({
             error: error.errors || error.message || 'Login failed',
+        });
+    }
+};
+
+export const getProfile = async (req: AuthRequest, res: Response) => {
+    try {
+        const userId = req.user?.userId;
+
+        if (!userId) {
+            return res.status(401).json({ message: 'Unauthorized: User ID missing' });
+        }
+
+        const user = await authService.getUserProfile(userId);
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        return res.status(200).json({
+            message: 'Profile fetched successfully',
+            data: user,
+        });
+    } catch (error: any) {
+        return res.status(500).json({
+            message: 'Error fetching profile',
+            error: error.message,
         });
     }
 };
