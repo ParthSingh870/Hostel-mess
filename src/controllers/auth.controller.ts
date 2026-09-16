@@ -1,5 +1,5 @@
-import { Request, Response } from 'express';
-import { registerSchema, loginSchema } from '../validators/auth.validator.js';
+import { Request, Response, NextFunction } from 'express';
+import { registerSchema, loginSchema, refreshTokenSchema } from '../validators/auth.validator.js';
 import * as authService from '../services/auth.service.js';
 import { AuthRequest } from '../middlewares/auth.middleware.js';
 
@@ -31,6 +31,22 @@ export const login = async (req: Request, res: Response) => {
     } catch (error: any) {
         return res.status(400).json({
             error: error.errors || error.message || 'Login failed',
+        });
+    }
+};
+
+export const refreshToken = async (req: Request, res: Response) => {
+    try {
+        const validatedData = refreshTokenSchema.parse(req.body);
+        const result = await authService.refreshAccessToken(validatedData.refreshToken);
+
+        return res.status(200).json({
+            message: 'Access token refreshed successfully',
+            data: result,
+        });
+    } catch (error: any) {
+        return res.status(401).json({
+            error: error.errors || error.message || 'Token refresh failed',
         });
     }
 };

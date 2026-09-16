@@ -12,9 +12,14 @@ export const loginSchema = z.object({ // Login data ke liye ek validation schema
     password: z.string().min(1, 'Password is required'), // Password string hona chahiye aur empty nahi hona chahiye.
 }); // Login schema yahan complete ho raha hai.
 
+export const refreshTokenSchema = z.object({
+    refreshToken: z.string().min(1, 'Refresh token is required'),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>; // registerSchema se automatically RegisterInput naam ka TypeScript type bana rahe hain.TypeScript ko batata hai ki RegisterInput data ka structure kya hoga.
 export type LoginInput = z.infer<typeof loginSchema>; // loginSchema se automatically LoginInput naam ka TypeScript type bana rahe hain.
 
+export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
 
 // ==================== BASIC EXAMPLE ====================
 

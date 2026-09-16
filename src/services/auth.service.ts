@@ -3,7 +3,29 @@ import jwt from 'jsonwebtoken';
 import prisma from '../config/prisma.js';
 import { RegisterInput, LoginInput } from '../validators/auth.validator.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'default_secret';
+// Define the payload structure
+interface TokenPayload {
+    userId: string;
+    role: string;
+}
+
+// Helper to generate access token (15 mins validity)
+export const generateAccessToken = (userId: string, role: string): string => {
+    return jwt.sign(
+        { userId, role },
+        process.env.JWT_SECRET || 'default_secret',
+        { expiresIn: '15m' }
+    );
+};
+
+// Helper to generate refresh token (7 days validity)
+export const generateRefreshToken = (userId: string, role: string): string => {
+    return jwt.sign(
+        { userId, role },
+        process.env.JWT_REFRESH_SECRET || 'default_refresh_secret',
+        { expiresIn: '7d' }
+    );
+};
 
 export const registerUser = async (data: RegisterInput) => { //registerUser ek function hai jo data naam ka input lega, aur us data ka structure RegisterInput (jo auth.validator.js mein define hai) jaisa hona chahiye.
     const existingUser = await prisma.user.findUnique({
@@ -49,11 +71,9 @@ export const loginUser = async (data: LoginInput) => {
         throw new Error('Invalid email or password');
     }
 
-    const token = jwt.sign(
-        { userId: user.id, role: user.role },
-        JWT_SECRET,
-        { expiresIn: '1d' }
-    );
+    // Generate both short-lived access token and long-lived refresh token
+    const accessToken = generateAccessToken(user.id, user.role);
+    const refreshToken = generateRefreshToken(user.id, user.role);
 
     return {
         user: {
@@ -62,7 +82,8 @@ export const loginUser = async (data: LoginInput) => {
             email: user.email,
             role: user.role,
         },
-        token,
+        accessToken,
+        refreshToken,
     };
 };
 
@@ -79,4 +100,31 @@ export const getUserProfile = async (userId: string) => {
     });
 
     return user;
+};
+
+export const refreshAccessToken = async (refreshToken: string) => {
+    // 1. Verify refresh token signature & expiration
+    let decoded: TokenPayload;
+    try {
+        decoded = jwt.verify(
+            refreshToken,
+            process.env.JWT_REFRESH_SECRET || 'default_refresh_secret'
+        ) as TokenPayload;
+    } catch (error) {
+        throw new Error('Invalid or expired refresh token');
+    }
+
+    // 2. Ensure user still exists in database
+    const user = await prisma.user.findUnique({
+        where: { id: decoded.userId },
+    });
+
+    if (!user) {
+        throw new Error('User not found');
+    }
+
+    // 3. Issue new short-lived access token
+    const newAccessToken = generateAccessToken(user.id, user.role);
+
+    return { accessToken: newAccessToken };
 };
