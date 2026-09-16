@@ -5,9 +5,8 @@ import { AuthRequest } from '../middlewares/auth.middleware.js';
 
 export const register = async (req: Request, res: Response) => {
     try {
-        const validatedData = registerSchema.parse(req.body);//agr zod validation ke through data valid hai toh validatedData mein woh data aa jayega, warna error throw hoga.
-        const user = await authService.registerUser(validatedData);//registerUser ko jo data milega, kya woh RegisterInput(auth.validator.js) ke according hai?"
-
+        const validatedData = registerSchema.parse(req.body);
+        const user = await authService.registerUser(validatedData);
         return res.status(201).json({
             message: 'User registered successfully',
             data: user,

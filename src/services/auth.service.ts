@@ -27,7 +27,7 @@ export const generateRefreshToken = (userId: string, role: string): string => {
     );
 };
 
-export const registerUser = async (data: RegisterInput) => { //registerUser ek function hai jo data naam ka input lega, aur us data ka structure RegisterInput (jo auth.validator.js mein define hai) jaisa hona chahiye.
+export const registerUser = async (data: RegisterInput) => { 
     const existingUser = await prisma.user.findUnique({
         where: { email: data.email },
     });
