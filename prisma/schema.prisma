@@ -1,11 +1,10 @@
-generator client {
-  provider = "prisma-client-js"
-  //Iska matlab Prisma ko JavaScript/TypeScript ke liye Prisma Client generate karna hai... iske baad hame await prisma.user.findMany() se crud operations kr skte hai
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
-datasource db {
-  provider = "postgresql"       //jo database use kr rha hai uska naam
-  url      = env("DATABASE_URL")
+generator client {
+  provider = "prisma-client-js"
 }
 
 enum Role {
@@ -15,10 +14,22 @@ enum Role {
 }
 
 model User {
-  id        String   @id @default(uuid())  //yha @id ek primary key hai
+  id        String   @id @default(uuid())
   name      String
-  email     String   @unique        //email should be unique
+  email     String   @unique
   password  String
   role      Role     @default(STUDENT)
   createdAt DateTime @default(now())
+}
+
+model MenuItem {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  price       Int
+  category    String
+  isAvailable Boolean  @default(true)
+  stockCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

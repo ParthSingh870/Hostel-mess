@@ -27,7 +27,7 @@ export const generateRefreshToken = (userId: string, role: string): string => {
     );
 };
 
-export const registerUser = async (data: RegisterInput) => { 
+export const registerUser = async (data: RegisterInput) => {
     const existingUser = await prisma.user.findUnique({
         where: { email: data.email },
     });

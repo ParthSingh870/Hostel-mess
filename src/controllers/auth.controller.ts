@@ -6,7 +6,9 @@ import { AuthRequest } from '../middlewares/auth.middleware.js';
 export const register = async (req: Request, res: Response) => {
     try {
         const validatedData = registerSchema.parse(req.body);
+
         const user = await authService.registerUser(validatedData);
+
         return res.status(201).json({
             message: 'User registered successfully',
             data: user,
@@ -38,7 +40,6 @@ export const refreshToken = async (req: Request, res: Response) => {
     try {
         const validatedData = refreshTokenSchema.parse(req.body);
         const result = await authService.refreshAccessToken(validatedData.refreshToken);
-
         return res.status(200).json({
             message: 'Access token refreshed successfully',
             data: result,
