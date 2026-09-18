@@ -14,7 +14,7 @@ export const generateAccessToken = (userId: string, role: string): string => {
     return jwt.sign(
         { userId, role },
         process.env.JWT_SECRET || 'default_secret',
-        { expiresIn: '15m' }
+        { expiresIn: '20d' }
     );
 };
 
@@ -23,7 +23,7 @@ export const generateRefreshToken = (userId: string, role: string): string => {
     return jwt.sign(
         { userId, role },
         process.env.JWT_REFRESH_SECRET || 'default_refresh_secret',
-        { expiresIn: '7d' }
+        { expiresIn: '20d' }
     );
 };
 
