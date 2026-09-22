@@ -65,3 +65,27 @@ export const createOrder = async (userId: string, data: CreateOrderInput) => {
         return order;
     });
 };
+
+// Logged-in user ke saare orders fetch karne ke liye function
+export const getMyOrders = async (userId: string) => {
+    return await prisma.order.findMany({
+        where: { userId },
+        include: {
+            items: {
+                include: {
+                    menuItem: {
+                        select: {
+                            id: true,
+                            name: true,
+                            price: true,
+                            category: true,
+                        },
+                    },
+                },
+            },
+        },
+        orderBy: {
+            createdAt: 'desc', // Latest order sabse pehle dikhega
+        },
+    });
+};
