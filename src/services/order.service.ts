@@ -15,20 +15,27 @@ export const createOrder = async (userId: string, data: CreateOrderInput) => {
                 throw new Error(`Item ${item.menuItemId} is currently unavailable`);
             }
 
-            if (menuItem.stockCount < item.quantity) {
-                throw new Error(
-                    `Insufficient stock for "${menuItem.name}". Available: ${menuItem.stockCount}, Requested: ${item.quantity}`
-                );
-            }
-
-            await tx.menuItem.update({
-                where: { id: item.menuItemId },
+            // Atomic conditional decrement: prevents race conditions and negative stock
+            const updated = await tx.menuItem.updateMany({
+                where: {
+                    id: item.menuItemId,
+                    isAvailable: true,
+                    stockCount: {
+                        gte: item.quantity,
+                    },
+                },
                 data: {
                     stockCount: {
                         decrement: item.quantity,
                     },
                 },
             });
+
+            if (updated.count === 0) {
+                throw new Error(
+                    `Insufficient stock for "${menuItem.name}". Available: ${menuItem.stockCount}, Requested: ${item.quantity}`
+                );
+            }
 
             totalPrice += menuItem.price * item.quantity;
 

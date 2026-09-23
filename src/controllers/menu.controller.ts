@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import {
     createMenuItem,
     getAvailableMenuItems,
@@ -38,6 +39,9 @@ export const updateItem = async (req: Request<{ id: string }>, res: Response) =>
         const item = await updateMenuItem(id, validatedData);
         res.status(200).json(item);
     } catch (error: any) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+            return res.status(404).json({ message: 'Menu item not found' });
+        }
         res.status(400).json({ error: error.errors || error.message });
     }
 };
@@ -48,6 +52,9 @@ export const deleteItem = async (req: Request<{ id: string }>, res: Response) =>
         const item = await deleteMenuItem(id);
         res.status(200).json({ message: 'Menu item deactivated successfully', item });
     } catch (error: any) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+            return res.status(404).json({ message: 'Menu item not found' });
+        }
         res.status(400).json({ error: error.message });
     }
 };
