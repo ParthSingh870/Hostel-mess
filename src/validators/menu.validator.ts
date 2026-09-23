@@ -9,6 +9,7 @@ export const createMenuItemSchema = z.object({
     stockCount: z.number().int().nonnegative('Stock count cannot be negative').default(0),
 });
 
+
 export const updateMenuItemSchema = z.object({
     name: z.string().min(1, 'Name cannot be empty').optional(),
     description: z.string().optional(),
