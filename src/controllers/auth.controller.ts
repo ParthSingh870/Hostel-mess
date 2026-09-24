@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { registerSchema, loginSchema, refreshTokenSchema } from '../validators/auth.validator.js';
+import { registerSchema, loginSchema, refreshTokenSchema, logoutSchema } from '../validators/auth.validator.js';
 import * as authService from '../services/auth.service.js';
 import { AuthRequest } from '../middlewares/auth.middleware.js';
 
@@ -73,6 +73,20 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
         return res.status(500).json({
             message: 'Error fetching profile',
             error: error.message,
+        });
+    }
+};
+
+export const logout = async (req: Request, res: Response) => {
+    try {
+        const validatedData = logoutSchema.parse(req.body);
+        await authService.revokeRefreshToken(validatedData.refreshToken);
+        return res.status(200).json({
+            message: 'Logged out successfully',
+        });
+    } catch (error: any) {
+        return res.status(400).json({
+            error: error.errors || error.message || 'Logout failed',
         });
     }
 };

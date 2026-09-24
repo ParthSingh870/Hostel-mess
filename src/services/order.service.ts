@@ -1,5 +1,6 @@
 import prisma from '../config/prisma.js';
 import { CreateOrderInput } from '../validators/order.validator.js';
+import { OrderStatus } from '@prisma/client';
 
 export const createOrder = async (userId: string, data: CreateOrderInput) => {
     return await prisma.$transaction(async (tx) => {
@@ -94,5 +95,75 @@ export const getMyOrders = async (userId: string) => {
         orderBy: {
             createdAt: 'desc', // Latest order sabse pehle dikhega
         },
+    });
+};
+
+// Staff / Admin: Sabhi orders fetch karne ke liye service
+export const getAllOrders = async (status?: OrderStatus) => {
+    const whereClause: any = {};
+    if (status) {
+        whereClause.status = status;
+    }
+
+    return await prisma.order.findMany({
+        where: whereClause,
+        include: {
+            user: {
+                select: { id: true, name: true, email: true },
+            },
+            items: {
+                include: {
+                    menuItem: {
+                        select: { id: true, name: true, price: true, category: true },
+                    },
+                },
+            },
+        },
+        orderBy: { createdAt: 'desc' },
+    });
+};
+
+// Staff / Admin: Order status update karne ke liye service (cancellation par stock restore)
+export const updateOrderStatus = async (id: string, status: OrderStatus) => {
+    const existingOrder = await prisma.order.findUnique({
+        where: { id },
+        include: { items: true },
+    });
+
+    if (!existingOrder) {
+        throw new Error('Order not found');
+    }
+
+    return await prisma.$transaction(async (tx) => {
+        if (status === OrderStatus.CANCELLED && existingOrder.status !== OrderStatus.CANCELLED) {
+            for (const item of existingOrder.items) {
+                await tx.menuItem.update({
+                    where: { id: item.menuItemId },
+                    data: {
+                        stockCount: {
+                            increment: item.quantity,
+                        },
+                    },
+                });
+            }
+        }
+
+        return await tx.order.update({
+            where: { id },
+            data: { status },
+            include: {
+                items: {
+                    include: {
+                        menuItem: {
+                            select: {
+                                id: true,
+                                name: true,
+                                price: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
     });
 };

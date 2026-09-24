@@ -5,7 +5,8 @@ import {
     getAllOrders,
     updateOrderStatus,
 } from '../controllers/order.controller.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate } from '../middlewares/auth.middleware.js';
+import { authorize } from '../middlewares/rbac.middleware.js';
 import { Role } from '@prisma/client';
 
 const router = Router();

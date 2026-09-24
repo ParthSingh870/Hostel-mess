@@ -13,8 +13,8 @@ interface TokenPayload {
 export const generateAccessToken = (userId: string, role: string): string => {
     return jwt.sign(
         { userId, role },
-        process.env.JWT_SECRET || 'default_secret',
-        { expiresIn: '20d' }
+        process.env.JWT_SECRET || 'default_jwt_secret',
+        { expiresIn: '15m' }
     );
 };
 
@@ -23,7 +23,7 @@ export const generateRefreshToken = (userId: string, role: string): string => {
     return jwt.sign(
         { userId, role },
         process.env.JWT_REFRESH_SECRET || 'default_refresh_secret',
-        { expiresIn: '20d' }
+        { expiresIn: '7d' }
     );
 };
 
@@ -43,7 +43,7 @@ export const registerUser = async (data: RegisterInput) => {
             name: data.name,
             email: data.email,
             password: hashedPassword,
-            role: data.role,
+            role: 'STUDENT', // Hardcoded: Public registration can only create STUDENT accounts
         },
         select: {
             id: true,
@@ -71,9 +71,19 @@ export const loginUser = async (data: LoginInput) => {
         throw new Error('Invalid email or password');
     }
 
-    // Generate both short-lived access token and long-lived refresh token
+    // Generate short-lived access token (15m) and refresh token (7d)
     const accessToken = generateAccessToken(user.id, user.role);
     const refreshToken = generateRefreshToken(user.id, user.role);
+
+    // Store refresh token in database for revocation tracking
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await prisma.refreshToken.create({
+        data: {
+            token: refreshToken,
+            userId: user.id,
+            expiresAt,
+        },
+    });
 
     return {
         user: {
@@ -114,7 +124,16 @@ export const refreshAccessToken = async (refreshToken: string) => {
         throw new Error('Invalid or expired refresh token');
     }
 
-    // 2. Ensure user still exists in database
+    // 2. Check token in database and ensure it has not been revoked
+    const tokenRecord = await prisma.refreshToken.findUnique({
+        where: { token: refreshToken },
+    });
+
+    if (!tokenRecord || tokenRecord.revoked || tokenRecord.expiresAt < new Date()) {
+        throw new Error('Invalid or revoked refresh token');
+    }
+
+    // 3. Ensure user still exists in database
     const user = await prisma.user.findUnique({
         where: { id: decoded.userId },
     });
@@ -123,8 +142,23 @@ export const refreshAccessToken = async (refreshToken: string) => {
         throw new Error('User not found');
     }
 
-    // 3. Issue new short-lived access token
+    // 4. Issue new short-lived access token
     const newAccessToken = generateAccessToken(user.id, user.role);
 
     return { accessToken: newAccessToken };
+};
+
+export const revokeRefreshToken = async (refreshToken: string) => {
+    const tokenRecord = await prisma.refreshToken.findUnique({
+        where: { token: refreshToken },
+    });
+
+    if (!tokenRecord) {
+        throw new Error('Refresh token not found');
+    }
+
+    await prisma.refreshToken.update({
+        where: { token: refreshToken },
+        data: { revoked: true },
+    });
 };

@@ -2,8 +2,12 @@ import { Response } from 'express';
 import { z } from 'zod';
 import { AuthRequest } from '../middlewares/auth.middleware.js';
 import { createOrderSchema, updateOrderStatusSchema } from '../validators/order.validator.js';
-import { createOrder, getMyOrders as getMyOrdersService } from '../services/order.service.js';
-import prisma from '../config/prisma.js';
+import {
+    createOrder,
+    getMyOrders as getMyOrdersService,
+    getAllOrders as getAllOrdersService,
+    updateOrderStatus as updateOrderStatusService,
+} from '../services/order.service.js';
 import { OrderStatus } from '@prisma/client';
 
 export const placeOrder = async (req: AuthRequest, res: Response) => {
@@ -64,34 +68,16 @@ export const getMyOrders = async (req: AuthRequest, res: Response) => {
 export const getAllOrders = async (req: AuthRequest, res: Response) => {
     try {
         const { status } = req.query;
-        const whereClause: any = {};
 
         if (status && typeof status === 'string') {
-            if (Object.values(OrderStatus).includes(status as OrderStatus)) {
-                whereClause.status = status as OrderStatus;
-            } else {
+            if (!Object.values(OrderStatus).includes(status as OrderStatus)) {
                 return res.status(400).json({
                     message: `Invalid status. Allowed values: ${Object.values(OrderStatus).join(', ')}`,
                 });
             }
         }
 
-        const orders = await prisma.order.findMany({
-            where: whereClause,
-            include: {
-                user: {
-                    select: { id: true, name: true, email: true },
-                },
-                items: {
-                    include: {
-                        menuItem: {
-                            select: { id: true, name: true, price: true, category: true },
-                        },
-                    },
-                },
-            },
-            orderBy: { createdAt: 'desc' },
-        });
+        const orders = await getAllOrdersService(status as OrderStatus | undefined);
 
         return res.status(200).json({
             message: 'Orders retrieved successfully',
@@ -106,7 +92,7 @@ export const getAllOrders = async (req: AuthRequest, res: Response) => {
     }
 };
 
-// Staff / Admin: Order ka status update karne ke liye (CANCELLED hone par stock restore karta hai)
+// Staff / Admin: Order ka status update karne ke liye
 export const updateOrderStatus = async (req: AuthRequest, res: Response) => {
     try {
         const id = req.params.id as string;
@@ -116,52 +102,10 @@ export const updateOrderStatus = async (req: AuthRequest, res: Response) => {
         }
 
         const validatedData = updateOrderStatusSchema.parse(req.body);
-        const { status } = validatedData;
-
-        const existingOrder = await prisma.order.findUnique({
-            where: { id },
-            include: { items: true },
-        });
-
-        if (!existingOrder) {
-            return res.status(404).json({ message: 'Order not found' });
-        }
-
-        const updatedOrder = await prisma.$transaction(async (tx) => {
-            if (status === OrderStatus.CANCELLED && existingOrder.status !== OrderStatus.CANCELLED) {
-                for (const item of existingOrder.items) {
-                    await tx.menuItem.update({
-                        where: { id: item.menuItemId },
-                        data: {
-                            stockCount: {
-                                increment: item.quantity,
-                            },
-                        },
-                    });
-                }
-            }
-
-            return await tx.order.update({
-                where: { id },
-                data: { status },
-                include: {
-                    items: {
-                        include: {
-                            menuItem: {
-                                select: {
-                                    id: true,
-                                    name: true,
-                                    price: true,
-                                },
-                            },
-                        },
-                    },
-                },
-            });
-        });
+        const updatedOrder = await updateOrderStatusService(id, validatedData.status);
 
         return res.status(200).json({
-            message: `Order status updated to ${status}`,
+            message: `Order status updated to ${validatedData.status}`,
             data: updatedOrder,
         });
     } catch (error: any) {
@@ -173,6 +117,10 @@ export const updateOrderStatus = async (req: AuthRequest, res: Response) => {
                     message: issue.message,
                 })),
             });
+        }
+
+        if (error.message === 'Order not found') {
+            return res.status(404).json({ message: 'Order not found' });
         }
 
         return res.status(500).json({
