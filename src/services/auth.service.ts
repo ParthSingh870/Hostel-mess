@@ -13,7 +13,7 @@ interface TokenPayload {
 export const generateAccessToken = (userId: string, role: string): string => {
     return jwt.sign(
         { userId, role },
-        process.env.JWT_SECRET || 'default_jwt_secret',
+        process.env.JWT_SECRET as string,
         { expiresIn: '15m' }
     );
 };
@@ -22,7 +22,7 @@ export const generateAccessToken = (userId: string, role: string): string => {
 export const generateRefreshToken = (userId: string, role: string): string => {
     return jwt.sign(
         { userId, role },
-        process.env.JWT_REFRESH_SECRET || 'default_refresh_secret',
+        process.env.JWT_REFRESH_SECRET as string,
         { expiresIn: '7d' }
     );
 };
@@ -118,7 +118,7 @@ export const refreshAccessToken = async (refreshToken: string) => {
     try {
         decoded = jwt.verify(
             refreshToken,
-            process.env.JWT_REFRESH_SECRET || 'default_refresh_secret'
+            process.env.JWT_REFRESH_SECRET as string
         ) as TokenPayload;
     } catch (error) {
         throw new Error('Invalid or expired refresh token');

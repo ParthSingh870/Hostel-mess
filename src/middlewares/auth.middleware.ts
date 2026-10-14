@@ -19,7 +19,7 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
     const token = authHeader.split(' ')[1];
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default_jwt_secret') as {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as {
             userId: string;
             role: string;
         };
