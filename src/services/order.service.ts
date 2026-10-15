@@ -123,7 +123,15 @@ export const getAllOrders = async (status?: OrderStatus) => {
     });
 };
 
-// Staff / Admin: Order status update karne ke liye service (cancellation par stock restore)
+const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+    [OrderStatus.PLACED]: [OrderStatus.PREPARING, OrderStatus.CANCELLED],
+    [OrderStatus.PREPARING]: [OrderStatus.READY, OrderStatus.CANCELLED],
+    [OrderStatus.READY]: [OrderStatus.COMPLETED],
+    [OrderStatus.COMPLETED]: [],
+    [OrderStatus.CANCELLED]: [],
+};
+
+// Staff / Admin: Order status update karne ke liye service (strict transitions + atomic stock restoration)
 export const updateOrderStatus = async (id: string, status: OrderStatus) => {
     const existingOrder = await prisma.order.findUnique({
         where: { id },
@@ -134,8 +142,31 @@ export const updateOrderStatus = async (id: string, status: OrderStatus) => {
         throw new Error('Order not found');
     }
 
+    const allowed = ALLOWED_TRANSITIONS[existingOrder.status];
+    if (!allowed || !allowed.includes(status)) {
+        throw new Error(
+            `Invalid status transition from "${existingOrder.status}" to "${status}"`
+        );
+    }
+
     return await prisma.$transaction(async (tx) => {
-        if (status === OrderStatus.CANCELLED && existingOrder.status !== OrderStatus.CANCELLED) {
+        // Atomic status update: only updates if the current status matches what was read
+        const updateResult = await tx.order.updateMany({
+            where: {
+                id,
+                status: existingOrder.status,
+            },
+            data: {
+                status,
+            },
+        });
+
+        if (updateResult.count === 0) {
+            throw new Error('Order status was modified concurrently');
+        }
+
+        // Stock is restored only on a valid cancellation that successfully updated the order
+        if (status === OrderStatus.CANCELLED) {
             for (const item of existingOrder.items) {
                 await tx.menuItem.update({
                     where: { id: item.menuItemId },
@@ -148,9 +179,8 @@ export const updateOrderStatus = async (id: string, status: OrderStatus) => {
             }
         }
 
-        return await tx.order.update({
+        return await tx.order.findUnique({
             where: { id },
-            data: { status },
             include: {
                 items: {
                     include: {

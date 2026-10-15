@@ -123,6 +123,14 @@ export const updateOrderStatus = async (req: AuthRequest, res: Response) => {
             return res.status(404).json({ message: 'Order not found' });
         }
 
+        if (error.message && error.message.startsWith('Invalid status transition')) {
+            return res.status(400).json({ message: error.message });
+        }
+
+        if (error.message === 'Order status was modified concurrently') {
+            return res.status(409).json({ message: error.message });
+        }
+
         return res.status(500).json({
             message: 'Internal server error',
             error: error.message,
