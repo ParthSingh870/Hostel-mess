@@ -22,10 +22,9 @@ export const createItem = async (req: Request, res: Response) => {
     }
 };
 
-
 export const getItems = async (_req: Request, res: Response) => {
     try {
-        const items = await getAvailableMenuItems(); 
+        const items = await getAvailableMenuItems();
 
         res.status(200).json(items);
     } catch (error: any) {
@@ -33,7 +32,7 @@ export const getItems = async (_req: Request, res: Response) => {
     }
 };
 
-export const updateItem = async (req: Request<{ id: string }>, res: Response) => {// here req: Request<{ id: string }> indicates that the request object is expected to have a parameter id of type string. This is useful for TypeScript to provide type checking and autocompletion for the request parameters, ensuring that the id parameter is treated as a string throughout the function. It helps prevent potential runtime errors by catching type mismatches during development.
+export const updateItem = async (req: Request<{ id: string }>, res: Response) => {//here req: Request<{ id: string }> indicates that the request object is expected to have a parameter id of type string. This is useful for TypeScript to provide type checking and autocompletion for the request parameters, ensuring that the id parameter is treated as a string throughout the function. It helps prevent potential runtime errors by catching type mismatches during development.
     try {
         const { id } = req.params;
         const validatedData = updateMenuItemSchema.parse(req.body);

@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { Prisma } from '@prisma/client';
 import { registerSchema, loginSchema, refreshTokenSchema, logoutSchema } from '../validators/auth.validator.js';
 import * as authService from '../services/auth.service.js';
 import { AuthRequest } from '../middlewares/auth.middleware.js';
@@ -14,6 +15,15 @@ export const register = async (req: Request, res: Response) => {
             data: user,
         });
     } catch (error: any) {
+        if (
+            (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') ||
+            error.message === 'User already exists with this email'
+        ) {
+            return res.status(409).json({
+                message: 'User already exists with this email',
+            });
+        }
+
         return res.status(400).json({
             error: error.errors || error.message || 'Registration failed',
         });
