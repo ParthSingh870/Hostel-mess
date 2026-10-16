@@ -64,10 +64,10 @@ export const getMyOrders = async (req: AuthRequest, res: Response) => {
     }
 };
 
-// Staff / Admin: Sabhi orders dekhne ke liye (optional status filter ke sath)
+// Staff / Admin: Sabhi orders dekhne ke liye (optional status filter aur pagination ke sath)
 export const getAllOrders = async (req: AuthRequest, res: Response) => {
     try {
-        const { status } = req.query;
+        const { status, page, limit } = req.query;
 
         if (status && typeof status === 'string') {
             if (!Object.values(OrderStatus).includes(status as OrderStatus)) {
@@ -77,12 +77,23 @@ export const getAllOrders = async (req: AuthRequest, res: Response) => {
             }
         }
 
-        const orders = await getAllOrdersService(status as OrderStatus | undefined);
+        const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
+        const parsedLimit = parseInt(limit as string, 10) || 20;
+        const limitNum = Math.min(100, Math.max(1, parsedLimit));
+
+        const { orders, total } = await getAllOrdersService(
+            status as OrderStatus | undefined,
+            pageNum,
+            limitNum
+        );
 
         return res.status(200).json({
-            message: 'Orders retrieved successfully',
-            count: orders.length,
             data: orders,
+            meta: {
+                page: pageNum,
+                limit: limitNum,
+                total,
+            },
         });
     } catch (error: any) {
         return res.status(500).json({

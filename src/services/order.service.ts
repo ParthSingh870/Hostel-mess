@@ -98,29 +98,42 @@ export const getMyOrders = async (userId: string) => {
     });
 };
 
-// Staff / Admin: Sabhi orders fetch karne ke liye service
-export const getAllOrders = async (status?: OrderStatus) => {
+// Staff / Admin: Sabhi orders fetch karne ke liye service (paginated)
+export const getAllOrders = async (
+    status?: OrderStatus,
+    page: number = 1,
+    limit: number = 20
+) => {
     const whereClause: any = {};
     if (status) {
         whereClause.status = status;
     }
 
-    return await prisma.order.findMany({
-        where: whereClause,
-        include: {
-            user: {
-                select: { id: true, name: true, email: true },
-            },
-            items: {
-                include: {
-                    menuItem: {
-                        select: { id: true, name: true, price: true, category: true },
+    const skip = (page - 1) * limit;
+
+    const [orders, total] = await Promise.all([
+        prisma.order.findMany({
+            where: whereClause,
+            skip,
+            take: limit,
+            include: {
+                user: {
+                    select: { id: true, name: true, email: true },
+                },
+                items: {
+                    include: {
+                        menuItem: {
+                            select: { id: true, name: true, price: true, category: true },
+                        },
                     },
                 },
             },
-        },
-        orderBy: { createdAt: 'desc' },
-    });
+            orderBy: { createdAt: 'desc' },
+        }),
+        prisma.order.count({ where: whereClause }),
+    ]);
+
+    return { orders, total };
 };
 
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
