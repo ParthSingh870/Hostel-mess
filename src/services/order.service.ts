@@ -12,8 +12,12 @@ export const createOrder = async (userId: string, data: CreateOrderInput) => {
                 where: { id: item.menuItemId },
             });
 
-            if (!menuItem || !menuItem.isAvailable) {
-                throw new Error(`Item ${item.menuItemId} is currently unavailable`);
+            if (!menuItem) {
+                throw new Error('Menu item not found');
+            }
+
+            if (!menuItem.isAvailable) {
+                throw new Error(`Item "${menuItem.name}" is currently unavailable`);
             }
 
             // Atomic conditional decrement: prevents race conditions and negative stock

@@ -8,7 +8,7 @@ import {
     getAllOrders as getAllOrdersService,
     updateOrderStatus as updateOrderStatusService,
 } from '../services/order.service.js';
-import { OrderStatus } from '@prisma/client';
+import { OrderStatus, Prisma } from '@prisma/client';
 
 export const placeOrder = async (req: AuthRequest, res: Response) => {
     try {
@@ -34,6 +34,13 @@ export const placeOrder = async (req: AuthRequest, res: Response) => {
                     message: issue.message,
                 })),
             });
+        }
+
+        if (
+            error.message === 'Menu item not found' ||
+            (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025')
+        ) {
+            return res.status(404).json({ message: 'Menu item not found' });
         }
 
         return res.status(400).json({
@@ -130,7 +137,10 @@ export const updateOrderStatus = async (req: AuthRequest, res: Response) => {
             });
         }
 
-        if (error.message === 'Order not found') {
+        if (
+            error.message === 'Order not found' ||
+            (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025')
+        ) {
             return res.status(404).json({ message: 'Order not found' });
         }
 
