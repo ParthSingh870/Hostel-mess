@@ -3,7 +3,13 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "dev": "tsx src/server.ts"
+    "dev": "tsx src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test:manual:suite": "tsx tests-manual/test-all.ts",
+    "test:manual:dupe": "node tests-manual/test_dupe.cjs",
+    "test:manual:concurrency": "node tests-manual/test_concurrent_order.cjs",
+    "test:manual:double-cancel": "node tests-manual/test_double_cancel.cjs"
   },
   "keywords": [],
   "author": "",
