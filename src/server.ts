@@ -5,8 +5,8 @@ import authRoutes from './routes/auth.routes.js';
 import menuRoutes from './routes/menu.routes.js';
 import orderRoutes from './routes/order.routes.js';
 
-if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET) {
-    console.error('FATAL: JWT_SECRET and JWT_REFRESH_SECRET must be defined in environment variables.');
+if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET || !process.env.REDIS_URL) {
+    console.error('FATAL: JWT_SECRET, JWT_REFRESH_SECRET, and REDIS_URL must be defined in environment variables.');
     process.exit(1);
 }
 
