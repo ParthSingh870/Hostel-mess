@@ -1,4 +1,5 @@
 import { Queue, JobsOptions } from 'bullmq';
+
 import { redisConnection } from '../config/redis.js';
 
 export const KITCHEN_QUEUE_NAME = 'kitchen-queue';
