@@ -15,7 +15,8 @@
     "test:manual:queue": "tsx tests-manual/test_queue_enqueue.ts",
     "test:manual:order-hook": "tsx tests-manual/test_order_queue_hook.ts",
     "test:manual:worker": "tsx tests-manual/test_kitchen_worker.ts",
-    "test:manual:failure": "tsx tests-manual/test_worker_failure.ts"
+    "test:manual:failure": "tsx tests-manual/test_worker_failure.ts",
+    "test:manual:complete": "tsx tests-manual/test_complete_endpoint.ts"
   },
   "keywords": [],
   "author": "",
