@@ -19,7 +19,7 @@ export const queueRedisConfig: RedisOptions = {
 
 // 2. Worker config:
 // - maxRetriesPerRequest: null (required for blocking commands like BLMOVE)
-// - enableOfflineQueue: true (workers wait for Redis to reconnect)
+// - enableOfflineQueue: not explicitly set, uses ioredis default (true) so workers wait for Redis to reconnect
 export const workerRedisConfig: RedisOptions = {
     maxRetriesPerRequest: null,
 };
