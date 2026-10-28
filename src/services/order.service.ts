@@ -80,10 +80,15 @@ export const createOrder = async (userId: string, data: CreateOrderInput) => {
     });
 
     // 2. Enqueue order to kitchen queue strictly AFTER DB transaction commits.
-    // If Redis is temporarily down, we log the error but still return the created order
-    // so the student is not blocked. The order remains 'PLACED' in the database.
+    // Wrap enqueueOrder with a 2.5s timeout so order creation can NEVER hang on the queue.
     try {
-        await enqueueOrder(order.id);
+        const enqueueWithTimeout = Promise.race([
+            enqueueOrder(order.id),
+            new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Queue enqueue timed out after 2.5s')), 2500)
+            ),
+        ]);
+        await enqueueWithTimeout;
     } catch (queueError: any) {
         console.error(
             `[Queue Error]: Failed to enqueue order ${order.id} to kitchen queue:`,
