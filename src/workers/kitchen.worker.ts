@@ -126,11 +126,19 @@ export const handleJobFailure = async (job: Job<KitchenJobData> | undefined, err
         `[Worker] Job ${job.id} failed (attempt ${job.attemptsMade}/${maxAttempts}): ${err.message}`
     );
 
-    // Only auto-cancel when all retry attempts have been exhausted
-    if (job.attemptsMade >= maxAttempts) {
+    const isAttemptsExhausted = job.attemptsMade >= maxAttempts;
+    const isStalledOrUnrecoverable =
+        err.name === 'UnrecoverableError' ||
+        (Boolean(err.message) && err.message.includes('stalled more than allowable limit'));
+
+    // Treat as terminal failure if attempts are exhausted OR job stalled beyond limit / unrecoverable
+    if (isAttemptsExhausted || isStalledOrUnrecoverable) {
         const { orderId } = job.data;
+        const reason = isStalledOrUnrecoverable
+            ? `stalled/unrecoverable error (${err.name})`
+            : `exhausted all ${maxAttempts} attempts`;
         console.error(
-            `[Worker] Order ${orderId} exhausted all ${maxAttempts} attempts. Cancelling and restoring stock...`
+            `[Worker] Order ${orderId} reached terminal failure (${reason}). Cancelling and restoring stock...`
         );
 
         try {
