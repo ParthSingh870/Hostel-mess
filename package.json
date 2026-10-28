@@ -17,6 +17,7 @@
     "test:manual:worker": "tsx tests-manual/test_kitchen_worker.ts",
     "test:manual:failure": "tsx tests-manual/test_worker_failure.ts",
     "test:manual:complete": "tsx tests-manual/test_complete_endpoint.ts",
+    "test:manual:cancel-prep": "tsx tests-manual/test_cancel_during_prep.ts",
     "test:manual:timeline": "tsx tests-manual/test_concurrency_timeline.ts"
   },
   "keywords": [],

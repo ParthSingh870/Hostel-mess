@@ -1,4 +1,5 @@
 // tests-manual/test_complete_endpoint.ts
+import 'dotenv/config';
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import { createServer } from 'http';
@@ -99,6 +100,19 @@ async function testCompleteEndpoint() {
         });
         console.log(`Status: ${res2.status} (Expected: 403)`);
         if (res2.status === 403) console.log('✅ PASS: Student forbidden from completing orders.');
+
+        // TEST 2b: Non-existent order / Fake UUID should fail (404)
+        console.log('\n--- TEST 2b: Fake UUID with Staff token ---');
+        const fakeId = '00000000-0000-0000-0000-000000000000';
+        const resFake = await fetch(`${BASE_URL}/api/orders/${fakeId}/complete`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${staffToken}` },
+        });
+        const dataFake: any = await resFake.json();
+        console.log(`Status: ${resFake.status} (Expected: 404) | Message: ${dataFake.message}`);
+        if (resFake.status === 404 && dataFake.message === 'Order not found') {
+            console.log('✅ PASS: Non-existent order returns 404 Not Found.');
+        }
 
         // TEST 3: Staff tries to complete order when status is PLACED (Should fail 400)
         console.log('\n--- TEST 3: Staff tries to complete order while still PLACED ---');

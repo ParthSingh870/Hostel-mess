@@ -19,6 +19,7 @@ const getPrepSeconds = (): number => {
 /**
  * Core job processor for preparing kitchen orders.
  * Uses atomic conditional updates to guarantee correct state transitions.
+ * Supports stalled-job recovery (resumes cooking if order was already PREPARING when worker crashed).
  */
 export const processKitchenJob = async (job: Job<KitchenJobData>) => {
     const { orderId } = job.data;
@@ -31,27 +32,54 @@ export const processKitchenJob = async (job: Job<KitchenJobData>) => {
         throw new Error('Simulated kitchen cooking failure for testing');
     }
 
-    // 1. Atomic conditional update: PLACED -> PREPARING
-    // Only transitions if the order is currently in 'PLACED' status
-    const placedUpdate = await prisma.order.updateMany({
-        where: {
-            id: orderId,
-            status: OrderStatus.PLACED,
-        },
-        data: {
-            status: OrderStatus.PREPARING,
-        },
+    // Check existing order status in database
+    const existingOrder = await prisma.order.findUnique({
+        where: { id: orderId },
     });
 
-    // If count === 0, the order was already cancelled or processed
-    if (placedUpdate.count === 0) {
-        console.log(
-            `[Worker] Order ${orderId} is not in PLACED status (count: 0). Skipping preparation.`
-        );
-        return { orderId, skipped: true, reason: 'NOT_IN_PLACED_STATUS' };
+    if (!existingOrder) {
+        console.log(`[Worker] Order ${orderId} not found in database. Skipping.`);
+        return { orderId, skipped: true, reason: 'ORDER_NOT_FOUND' };
     }
 
-    console.log(`[Worker] Order ${orderId}: PLACED -> PREPARING. Cooking for ${prepSeconds}s...`);
+    // If order was cancelled by staff or already completed/ready, skip gracefully
+    if (
+        existingOrder.status === OrderStatus.CANCELLED ||
+        existingOrder.status === OrderStatus.READY ||
+        existingOrder.status === OrderStatus.COMPLETED
+    ) {
+        console.log(
+            `[Worker] Order ${orderId} is already in "${existingOrder.status}" status. Skipping preparation.`
+        );
+        return { orderId, skipped: true, reason: `ALREADY_${existingOrder.status}` };
+    }
+
+    // 1. Transition PLACED -> PREPARING (if fresh order)
+    if (existingOrder.status === OrderStatus.PLACED) {
+        const placedUpdate = await prisma.order.updateMany({
+            where: {
+                id: orderId,
+                status: OrderStatus.PLACED,
+            },
+            data: {
+                status: OrderStatus.PREPARING,
+            },
+        });
+
+        if (placedUpdate.count === 0) {
+            console.log(
+                `[Worker] Order ${orderId} status modified concurrently from PLACED. Skipping.`
+            );
+            return { orderId, skipped: true, reason: 'CONCURRENT_STATUS_CHANGE' };
+        }
+
+        console.log(`[Worker] Order ${orderId}: PLACED -> PREPARING. Cooking for ${prepSeconds}s...`);
+    } else if (existingOrder.status === OrderStatus.PREPARING) {
+        // Stalled job recovery: previous worker crashed mid-prep!
+        console.log(
+            `[Worker] Order ${orderId} was already PREPARING (stalled-job recovery). Resuming cooking for ${prepSeconds}s...`
+        );
+    }
 
     // 2. Simulate food cooking / preparation time
     await new Promise((resolve) => setTimeout(resolve, prepSeconds * 1000));
@@ -172,7 +200,3 @@ export const gracefulShutdown = async (signal: string) => {
 
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-
