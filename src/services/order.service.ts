@@ -1,9 +1,11 @@
 import prisma from '../config/prisma.js';
 import { CreateOrderInput } from '../validators/order.validator.js';
 import { OrderStatus } from '@prisma/client';
+import { enqueueOrder } from '../queues/kitchen.queue.js';
 
 export const createOrder = async (userId: string, data: CreateOrderInput) => {
-    return await prisma.$transaction(async (tx) => {
+    // 1. Commit order and atomic stock decrement to PostgreSQL database
+    const order = await prisma.$transaction(async (tx) => {
         let totalPrice = 0;
         const orderItemsToCreate = [];
 
@@ -76,6 +78,20 @@ export const createOrder = async (userId: string, data: CreateOrderInput) => {
 
         return order;
     });
+
+    // 2. Enqueue order to kitchen queue strictly AFTER DB transaction commits.
+    // If Redis is temporarily down, we log the error but still return the created order
+    // so the student is not blocked. The order remains 'PLACED' in the database.
+    try {
+        await enqueueOrder(order.id);
+    } catch (queueError: any) {
+        console.error(
+            `[Queue Error]: Failed to enqueue order ${order.id} to kitchen queue:`,
+            queueError?.message || queueError
+        );
+    }
+
+    return order;
 };
 
 // Logged-in user ke saare orders fetch karne ke liye function

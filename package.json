@@ -11,7 +11,8 @@
     "test:manual:concurrency": "node tests-manual/test_concurrent_order.cjs",
     "test:manual:double-cancel": "node tests-manual/test_double_cancel.cjs",
     "test:manual:redis": "tsx tests-manual/test_redis_ping.ts",
-    "test:manual:queue": "tsx tests-manual/test_queue_enqueue.ts"
+    "test:manual:queue": "tsx tests-manual/test_queue_enqueue.ts",
+    "test:manual:order-hook": "tsx tests-manual/test_order_queue_hook.ts"
   },
   "keywords": [],
   "author": "",
