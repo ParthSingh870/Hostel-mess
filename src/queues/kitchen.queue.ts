@@ -1,5 +1,4 @@
 import { Queue, JobsOptions } from 'bullmq';
-
 import { redisConnection } from '../config/redis.js';
 
 export const KITCHEN_QUEUE_NAME = 'kitchen-queue';
@@ -44,6 +43,14 @@ export const kitchenQueue = new Queue<KitchenJobData>(KITCHEN_QUEUE_NAME, {
  * BullMQ will reject duplicate enqueue calls for the same orderId.
  */
 export const enqueueOrder = async (orderId: string) => {
+    // If Redis is connecting during server startup, wait up to 2 seconds for it to become 'ready'
+    if (redisConnection.status === 'connecting' || redisConnection.status === 'connect') {
+        await Promise.race([
+            new Promise((resolve) => redisConnection.once('ready', resolve)),
+            new Promise((resolve) => setTimeout(resolve, 2000)),
+        ]);
+    }
+
     return await kitchenQueue.add(
         'prepare-order',
         { orderId },

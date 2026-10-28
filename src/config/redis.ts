@@ -9,18 +9,29 @@ if (!redisUrl) {
     process.exit(1);
 }
 
-// BullMQ requires maxRetriesPerRequest to be null.
-// BullMQ handles its own job retries and uses blocking Redis commands (like BLMOVE)
-// to wait for jobs. If this is not null, ioredis will abort waiting commands on network hiccups.
-export const redisConfig: RedisOptions = {
+// 1. Queue / Producer config:
+// - maxRetriesPerRequest: null (required by BullMQ)
+// - enableOfflineQueue: false (rejects commands immediately when Redis is down instead of hanging in memory queue)
+export const queueRedisConfig: RedisOptions = {
+    maxRetriesPerRequest: null,
+    enableOfflineQueue: false,
+};
+
+// 2. Worker config:
+// - maxRetriesPerRequest: null (required for blocking commands like BLMOVE)
+// - enableOfflineQueue: not explicitly set, uses ioredis default (true) so workers wait for Redis to reconnect
+export const workerRedisConfig: RedisOptions = {
     maxRetriesPerRequest: null,
 };
 
-// Shared ioredis client instance for BullMQ queues and general Redis operations
-export const redisConnection = new Redis(redisUrl, redisConfig);
+// Export redisConfig as alias to maintain compatibility
+export const redisConfig = queueRedisConfig;
 
-// Helper function to create isolated connection instances (needed by BullMQ Workers)
-export const createRedisConnection = (): Redis => new Redis(redisUrl, redisConfig);
+// Shared ioredis client instance for BullMQ queues and general Redis operations
+export const redisConnection = new Redis(redisUrl, queueRedisConfig);
+
+// Helper function to create isolated connection instances (used by BullMQ Workers)
+export const createRedisConnection = (): Redis => new Redis(redisUrl, workerRedisConfig);
 
 // Log any unexpected Redis connection errors
 redisConnection.on('error', (err) => {

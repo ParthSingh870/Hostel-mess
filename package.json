@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "tsx src/server.ts",
+    "dev:worker": "tsx src/workers/kitchen.worker.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "test:manual:suite": "tsx tests-manual/test-all.ts",
@@ -11,7 +12,13 @@
     "test:manual:concurrency": "node tests-manual/test_concurrent_order.cjs",
     "test:manual:double-cancel": "node tests-manual/test_double_cancel.cjs",
     "test:manual:redis": "tsx tests-manual/test_redis_ping.ts",
-    "test:manual:queue": "tsx tests-manual/test_queue_enqueue.ts"
+    "test:manual:queue": "tsx tests-manual/test_queue_enqueue.ts",
+    "test:manual:order-hook": "tsx tests-manual/test_order_queue_hook.ts",
+    "test:manual:worker": "tsx tests-manual/test_kitchen_worker.ts",
+    "test:manual:failure": "tsx tests-manual/test_worker_failure.ts",
+    "test:manual:complete": "tsx tests-manual/test_complete_endpoint.ts",
+    "test:manual:cancel-prep": "tsx tests-manual/test_cancel_during_prep.ts",
+    "test:manual:timeline": "tsx tests-manual/test_concurrency_timeline.ts"
   },
   "keywords": [],
   "author": "",

@@ -4,6 +4,7 @@ import {
     getMyOrders,
     getAllOrders,
     updateOrderStatus,
+    completeOrder,
 } from '../controllers/order.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { authorize } from '../middlewares/rbac.middleware.js';
@@ -18,5 +19,6 @@ router.get('/my', authenticate, authorize(Role.STUDENT), getMyOrders);
 // Staff & Admin routes
 router.get('/', authenticate, authorize(Role.STAFF, Role.ADMIN), getAllOrders);
 router.patch('/:id/status', authenticate, authorize(Role.STAFF, Role.ADMIN), updateOrderStatus);
+router.patch('/:id/complete', authenticate, authorize(Role.STAFF, Role.ADMIN), completeOrder);
 
 export default router;
