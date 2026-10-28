@@ -4,6 +4,7 @@ import { OrderStatus } from '@prisma/client';
 import prisma from '../config/prisma.js';
 import { createRedisConnection } from '../config/redis.js';
 import { KITCHEN_QUEUE_NAME, KitchenJobData } from '../queues/kitchen.queue.js';
+import { updateOrderStatus } from '../services/order.service.js';
 
 // Read simulated preparation time from environment (default: 10 seconds)
 const getPrepSeconds = (): number => {
@@ -24,6 +25,11 @@ export const processKitchenJob = async (job: Job<KitchenJobData>) => {
     const prepSeconds = getPrepSeconds();
 
     console.log(`[Worker] Received job ${job.id} for Order ID: ${orderId}`);
+
+    // Simulation hook for manual/integration failure tests
+    if (process.env.SIMULATE_WORKER_FAILURE === 'true') {
+        throw new Error('Simulated kitchen cooking failure for testing');
+    }
 
     // 1. Atomic conditional update: PLACED -> PREPARING
     // Only transitions if the order is currently in 'PLACED' status
@@ -74,11 +80,55 @@ export const processKitchenJob = async (job: Job<KitchenJobData>) => {
 };
 
 // Dedicated Redis connection instance for Worker (to avoid blocking queue operations)
-const workerConnection = createRedisConnection();
+export const workerConnection = createRedisConnection();
 
 workerConnection.on('error', (err) => {
     console.error('[Worker Redis Error]:', err.message);
 });
+
+/**
+ * Handle job failure.
+ * When attempts are exhausted, marks the order CANCELLED and restores stock atomically.
+ */
+export const handleJobFailure = async (job: Job<KitchenJobData> | undefined, err: Error) => {
+    if (!job) return;
+
+    const maxAttempts = job.opts.attempts || 3;
+    console.error(
+        `[Worker] Job ${job.id} failed (attempt ${job.attemptsMade}/${maxAttempts}): ${err.message}`
+    );
+
+    // Only auto-cancel when all retry attempts have been exhausted
+    if (job.attemptsMade >= maxAttempts) {
+        const { orderId } = job.data;
+        console.error(
+            `[Worker] Order ${orderId} exhausted all ${maxAttempts} attempts. Cancelling and restoring stock...`
+        );
+
+        try {
+            const order = await prisma.order.findUnique({
+                where: { id: orderId },
+            });
+
+            // Only cancel if order is in a cancellable state (PLACED or PREPARING)
+            if (order && (order.status === OrderStatus.PLACED || order.status === OrderStatus.PREPARING)) {
+                await updateOrderStatus(orderId, OrderStatus.CANCELLED);
+                console.log(
+                    `[Worker] Order ${orderId} auto-cancelled and stock restored atomically.`
+                );
+            } else {
+                console.log(
+                    `[Worker] Order ${orderId} current status is "${order?.status}". No stock restoration needed.`
+                );
+            }
+        } catch (cancelErr: any) {
+            console.error(
+                `[Worker] Failed to auto-cancel order ${orderId}:`,
+                cancelErr.message
+            );
+        }
+    }
+};
 
 // Create and export the BullMQ Worker
 export const kitchenWorker = new Worker<KitchenJobData>(
@@ -100,7 +150,29 @@ kitchenWorker.on('completed', (job) => {
     console.log(`[Worker] Job ${job.id} completed successfully.`);
 });
 
-kitchenWorker.on('failed', (job, err) => {
-    console.error(`[Worker] Job ${job?.id} failed with error:`, err.message);
-});
+kitchenWorker.on('failed', handleJobFailure);
+
+/**
+ * Graceful shutdown handler.
+ * BullMQ waits for active in-flight jobs to finish before disconnecting.
+ */
+export const gracefulShutdown = async (signal: string) => {
+    console.log(`\n[Worker] Received ${signal}. Shutting down kitchen worker gracefully...`);
+    try {
+        await kitchenWorker.close();
+        await workerConnection.quit();
+        await prisma.$disconnect();
+        console.log('[Worker] Kitchen worker shut down cleanly. Exiting.');
+        process.exit(0);
+    } catch (shutdownErr: any) {
+        console.error('[Worker] Error during graceful shutdown:', shutdownErr.message);
+        process.exit(1);
+    }
+};
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
