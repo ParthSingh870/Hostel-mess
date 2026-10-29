@@ -2,25 +2,39 @@ import { Emitter } from '@socket.io/redis-emitter';
 import { redisConnection } from '../config/redis.js';
 import { OrderStatus } from '@prisma/client';
 
-// Dedicated duplicate Redis connection for the Emitter (NOT the BullMQ connection)
-// Set enableOfflineQueue: true so in-flight emits queue cleanly during transient reconnection
-const emitterRedisClient = redisConnection.duplicate({ enableOfflineQueue: true });
+// 1. Dedicated duplicate Redis connection with offline queue DISABLED for Emitter:
+// Drops publish commands immediately when Redis is down instead of buffering them in memory,
+// preventing memory leaks and avoiding late delivery of stale events on reconnection.
+const emitterRedisClient = redisConnection.duplicate({ enableOfflineQueue: false });
 
 emitterRedisClient.on('error', (err) => {
-    console.error('[Redis Emitter Error]:', err.message);
+    console.error('[Redis Emitter Connection Error]:', err.message);
 });
+
+// Track the current emit context so dropped publish rejections include order metadata
+let currentEmitContext: { userId: string; orderId: string; status: OrderStatus } | null = null;
+
+// 3. Wrap publish to safely catch unhandled rejections from @socket.io/redis-emitter
+const rawPublish = emitterRedisClient.publish.bind(emitterRedisClient);
+(emitterRedisClient as any).publish = (channel: any, message: any, ...rest: any[]) => {
+    const ctx = currentEmitContext;
+    return Promise.resolve(rawPublish(channel, message, ...rest)).catch((err: any) => {
+        if (ctx) {
+            console.error(
+                `[Redis Emitter Publish Dropped]: Failed to deliver status "${ctx.status}" for order "${ctx.orderId}" to user "${ctx.userId}" (${err.message})`
+            );
+        } else {
+            console.error(`[Redis Emitter Publish Dropped]: ${err.message}`);
+        }
+        return 0;
+    });
+};
 
 export const emitter = new Emitter(emitterRedisClient);
 
-const EMIT_TIMEOUT_MS = 2000;
-
 /**
  * Shared helper to emit order status changes to the specific user's private room.
- * Safely wraps the emit in a short timeout and try/catch so failures NEVER crash or hang the caller.
- *
- * @param userId - Target user ID (private room name)
- * @param orderId - ID of the order
- * @param status - Updated OrderStatus ('PLACED', 'PREPARING', 'READY', 'COMPLETED', 'CANCELLED')
+ * Safely drops events without hanging or buffering when Redis is unavailable.
  */
 export const emitOrderStatus = async (
     userId: string,
@@ -34,34 +48,28 @@ export const emitOrderStatus = async (
         return;
     }
 
-    try {
-        const emitPromise = new Promise<void>((resolve, reject) => {
-            try {
-                // S4: Emit strictly to target userId room with payload { orderId, status }
-                emitter.to(userId).emit('order:status', { orderId, status });
-                resolve();
-            } catch (err) {
-                reject(err);
-            }
+    // 4. Ensure emitter is connected if in initial 'connecting' startup state (takes ~5-10ms)
+    // so the very first event placed immediately after server startup is not dropped.
+    if (emitterRedisClient.status === 'connecting') {
+        await new Promise<void>((resolve) => {
+            emitterRedisClient.once('ready', () => resolve());
+            emitterRedisClient.once('error', () => resolve());
+            setTimeout(resolve, 1000);
         });
+    }
 
-        // Short timeout guarantee: Redis lag must NEVER hang a business transaction
-        const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(
-                () => reject(new Error(`Emit timed out after ${EMIT_TIMEOUT_MS}ms`)),
-                EMIT_TIMEOUT_MS
-            )
-        );
-
-        await Promise.race([emitPromise, timeoutPromise]);
+    try {
+        currentEmitContext = { userId, orderId, status };
+        emitter.to(userId).emit('order:status', { orderId, status });
         console.log(
             `[Realtime] Emitted status "${status}" for order "${orderId}" to user "${userId}"`
         );
     } catch (error: any) {
-        // Catch and log clearly; NEVER throw so caller status change always succeeds
         console.error(
             `[Realtime Emit Error]: Failed to emit status "${status}" for order "${orderId}" to user "${userId}":`,
             error.message
         );
+    } finally {
+        currentEmitContext = null;
     }
 };
