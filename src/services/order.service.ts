@@ -2,6 +2,7 @@ import prisma from '../config/prisma.js';
 import { CreateOrderInput } from '../validators/order.validator.js';
 import { OrderStatus } from '@prisma/client';
 import { enqueueOrder } from '../queues/kitchen.queue.js';
+import { emitOrderStatus } from '../realtime/emitOrderStatus.js';
 
 export const createOrder = async (userId: string, data: CreateOrderInput) => {
     // 1. Commit order and atomic stock decrement to PostgreSQL database
@@ -96,6 +97,9 @@ export const createOrder = async (userId: string, data: CreateOrderInput) => {
         );
     }
 
+    // 3. S5: Emit real-time PLACED status strictly after DB transaction commits
+    await emitOrderStatus(order.userId, order.id, OrderStatus.PLACED);
+
     return order;
 };
 
@@ -187,7 +191,7 @@ export const updateOrderStatus = async (id: string, status: OrderStatus) => {
         );
     }
 
-    return await prisma.$transaction(async (tx) => {
+    const updatedOrder = await prisma.$transaction(async (tx) => {
         // Atomic status update: only updates if the current status matches what was read
         const updateResult = await tx.order.updateMany({
             where: {
@@ -234,4 +238,9 @@ export const updateOrderStatus = async (id: string, status: OrderStatus) => {
             },
         });
     });
+
+    // S5: Emit real-time status strictly after DB transaction commits and update succeeded
+    await emitOrderStatus(existingOrder.userId, id, status);
+
+    return updatedOrder;
 };

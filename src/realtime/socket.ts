@@ -1,6 +1,8 @@
 import { Server as SocketIOServer } from 'socket.io';
 import type { Server as HttpServer } from 'http';
+import { createAdapter } from '@socket.io/redis-adapter';
 import jwt from 'jsonwebtoken';
+import { redisConnection } from '../config/redis.js';
 
 export interface SocketUserData {
     userId: string;
@@ -20,6 +22,16 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
             methods: ['GET', 'POST'],
         },
     });
+
+    // S4: Redis Adapter using separate pub/sub connections via duplicate()
+    // Explicitly enableOfflineQueue: true so psubscribe buffering succeeds during initial connection
+    const pubClient = redisConnection.duplicate({ enableOfflineQueue: true });
+    const subClient = redisConnection.duplicate({ enableOfflineQueue: true });
+
+    pubClient.on('error', (err) => console.error('[Socket.io Redis Pub Error]:', err.message));
+    subClient.on('error', (err) => console.error('[Socket.io Redis Sub Error]:', err.message));
+
+    io.adapter(createAdapter(pubClient, subClient));
 
     // S2: Handshake JWT Authentication Middleware
     io.use((socket, next) => {

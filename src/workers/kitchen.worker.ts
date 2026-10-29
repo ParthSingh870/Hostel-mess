@@ -5,6 +5,7 @@ import prisma from '../config/prisma.js';
 import { createRedisConnection } from '../config/redis.js';
 import { KITCHEN_QUEUE_NAME, KitchenJobData } from '../queues/kitchen.queue.js';
 import { updateOrderStatus } from '../services/order.service.js';
+import { emitOrderStatus } from '../realtime/emitOrderStatus.js';
 
 // Read simulated preparation time from environment (default: 10 seconds)
 const getPrepSeconds = (): number => {
@@ -74,6 +75,8 @@ export const processKitchenJob = async (job: Job<KitchenJobData>) => {
         }
 
         console.log(`[Worker] Order ${orderId}: PLACED -> PREPARING. Cooking for ${prepSeconds}s...`);
+        // S5: Emit PREPARING only when updateMany count > 0
+        await emitOrderStatus(existingOrder.userId, orderId, OrderStatus.PREPARING);
     } else if (existingOrder.status === OrderStatus.PREPARING) {
         // Stalled job recovery: previous worker crashed mid-prep!
         console.log(
@@ -104,6 +107,9 @@ export const processKitchenJob = async (job: Job<KitchenJobData>) => {
     }
 
     console.log(`[Worker] Order ${orderId}: PREPARING -> READY. Order is ready for pickup!`);
+    // S5: Emit READY only when updateMany count > 0
+    await emitOrderStatus(existingOrder.userId, orderId, OrderStatus.READY);
+
     return { orderId, status: OrderStatus.READY };
 };
 
