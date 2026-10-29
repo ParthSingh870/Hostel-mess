@@ -100,9 +100,9 @@ async function runM3() {
         '[Wait] Waiting for Kitchen Worker to process (PLACED -> PREPARING -> READY)...'
     );
 
-    // Wait up to 25s for worker to finish
+    // Wait up to 35s for worker to finish (prep takes 20s)
     const start = Date.now();
-    while (logsA.length < 3 && Date.now() - start < 25000) {
+    while (logsA.length < 3 && Date.now() - start < 35000) {
         await sleep(500);
     }
 
