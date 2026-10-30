@@ -3,6 +3,7 @@ import { CreateOrderInput } from '../validators/order.validator.js';
 import { OrderStatus } from '@prisma/client';
 import { enqueueOrder } from '../queues/kitchen.queue.js';
 import { emitOrderStatus } from '../realtime/emitOrderStatus.js';
+import { del, MENU_CACHE_KEY } from '../cache/cache.js';
 
 export const createOrder = async (userId: string, data: CreateOrderInput) => {
     // 1. Commit order and atomic stock decrement to PostgreSQL database
@@ -99,6 +100,9 @@ export const createOrder = async (userId: string, data: CreateOrderInput) => {
 
     // 3. S5: Emit real-time PLACED status strictly after DB transaction commits
     await emitOrderStatus(order.userId, order.id, OrderStatus.PLACED);
+
+    // 4. Invalidate menu cache strictly AFTER DB commit because stockCount changed
+    await del(MENU_CACHE_KEY);
 
     return order;
 };
@@ -241,6 +245,11 @@ export const updateOrderStatus = async (id: string, status: OrderStatus) => {
 
     // S5: Emit real-time status strictly after DB transaction commits and update succeeded
     await emitOrderStatus(existingOrder.userId, id, status);
+
+    // Invalidate menu cache strictly AFTER DB commit if order cancellation restored stock
+    if (status === OrderStatus.CANCELLED) {
+        await del(MENU_CACHE_KEY);
+    }
 
     return updatedOrder;
 };
