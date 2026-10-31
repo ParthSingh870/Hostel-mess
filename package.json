@@ -21,7 +21,16 @@
     "test:manual:timeline": "tsx tests-manual/test_concurrency_timeline.ts",
     "test:manual:s1": "tsx tests-manual/test_s1_cache.ts",
     "test:manual:s2": "tsx tests-manual/test_s2_menu_cache.ts",
-    "test:manual:s3": "tsx tests-manual/test_s3_invalidation.ts"
+    "test:manual:s3": "tsx tests-manual/test_s3_invalidation.ts",
+    "test:manual:s4": "tsx tests-manual/test_s4_ratelimit.ts",
+    "test:manual:s4-failopen": "tsx tests-manual/test_s4_failopen.ts",
+    "bench:menu": "tsx tests-manual/bench-menu.ts",
+    "bench:menu:down": "tsx tests-manual/bench-menu.ts --redis-down",
+    "test:manual:t2": "tsx tests-manual/test_t2_staff.ts",
+    "test:manual:t3": "tsx tests-manual/test_t3_order_stock.ts",
+    "test:manual:t4": "tsx tests-manual/test_t4_worker.ts",
+    "test:manual:t5": "tsx tests-manual/test_t5_ratelimit.ts",
+    "test:manual:t6": "tsx tests-manual/test_t6_concurrency.ts"
   },
   "keywords": [],
   "author": "",
