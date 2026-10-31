@@ -7,6 +7,7 @@ import {
     getMyOrders as getMyOrdersService,
     getAllOrders as getAllOrdersService,
     updateOrderStatus as updateOrderStatusService,
+    BusinessError,
 } from '../services/order.service.js';
 import { OrderStatus, Prisma } from '@prisma/client';
 
@@ -43,8 +44,27 @@ export const placeOrder = async (req: AuthRequest, res: Response) => {
             return res.status(404).json({ message: 'Menu item not found' });
         }
 
-        return res.status(400).json({
-            message: error.message || 'Failed to place order',
+        // Prisma transaction timeout (P2028) or connection pool timeout (P2024) -> 503
+        if (
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            (error.code === 'P2028' || error.code === 'P2024')
+        ) {
+            return res.status(503).json({
+                message: 'Server is busy, please retry',
+            });
+        }
+
+        // Deliberate business logic errors thrown by service layer (insufficient stock, unavailable) -> 400
+        if (error instanceof BusinessError) {
+            return res.status(400).json({
+                message: error.message,
+            });
+        }
+
+        // Unknown server errors: log full error internally on server, never leak error.message/paths to client
+        console.error('[CreateOrder Error]:', error);
+        return res.status(500).json({
+            message: 'Internal server error',
         });
     }
 };

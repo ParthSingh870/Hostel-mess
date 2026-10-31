@@ -2,56 +2,69 @@ import prisma from '../config/prisma.js';
 import { CreateOrderInput } from '../validators/order.validator.js';
 import { OrderStatus } from '@prisma/client';
 import { enqueueOrder } from '../queues/kitchen.queue.js';
+import { emitOrderStatus } from '../realtime/emitOrderStatus.js';
+import { del, MENU_CACHE_KEY } from '../cache/cache.js';
+
+export class BusinessError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'BusinessError';
+    }
+}
 
 export const createOrder = async (userId: string, data: CreateOrderInput) => {
+    const maxWait = Number(process.env.ORDER_TX_MAX_WAIT_MS) || 5000;
+    const timeout = Number(process.env.ORDER_TX_TIMEOUT_MS) || 10000;
+
     // 1. Commit order and atomic stock decrement to PostgreSQL database
-    const order = await prisma.$transaction(async (tx) => {
-        let totalPrice = 0;
-        const orderItemsToCreate = [];
+    const order = await prisma.$transaction(
+        async (tx) => {
+            let totalPrice = 0;
+            const orderItemsToCreate = [];
 
-        for (const item of data.items) {
-            const menuItem = await tx.menuItem.findUnique({
-                where: { id: item.menuItemId },
-            });
+            for (const item of data.items) {
+                const menuItem = await tx.menuItem.findUnique({
+                    where: { id: item.menuItemId },
+                });
 
-            if (!menuItem) {
-                throw new Error('Menu item not found');
-            }
+                if (!menuItem) {
+                    throw new Error('Menu item not found');
+                }
 
-            if (!menuItem.isAvailable) {
-                throw new Error(`Item "${menuItem.name}" is currently unavailable`);
-            }
+                if (!menuItem.isAvailable) {
+                    throw new BusinessError(`Item "${menuItem.name}" is currently unavailable`);
+                }
 
-            // Atomic conditional decrement: prevents race conditions and negative stock
-            const updated = await tx.menuItem.updateMany({
-                where: {
-                    id: item.menuItemId,
-                    isAvailable: true,
-                    stockCount: {
-                        gte: item.quantity,
+                // Atomic conditional decrement: prevents race conditions and negative stock
+                const updated = await tx.menuItem.updateMany({
+                    where: {
+                        id: item.menuItemId,
+                        isAvailable: true,
+                        stockCount: {
+                            gte: item.quantity,
+                        },
                     },
-                },
-                data: {
-                    stockCount: {
-                        decrement: item.quantity,
+                    data: {
+                        stockCount: {
+                            decrement: item.quantity,
+                        },
                     },
-                },
-            });
+                });
 
-            if (updated.count === 0) {
-                throw new Error(
-                    `Insufficient stock for "${menuItem.name}". Available: ${menuItem.stockCount}, Requested: ${item.quantity}`
-                );
+                if (updated.count === 0) {
+                    throw new BusinessError(
+                        `Insufficient stock for "${menuItem.name}". Available: ${menuItem.stockCount}, Requested: ${item.quantity}`
+                    );
+                }
+
+                totalPrice += menuItem.price * item.quantity;
+
+                orderItemsToCreate.push({
+                    menuItemId: item.menuItemId,
+                    quantity: item.quantity,
+                    priceAtOrder: menuItem.price,
+                });
             }
-
-            totalPrice += menuItem.price * item.quantity;
-
-            orderItemsToCreate.push({
-                menuItemId: item.menuItemId,
-                quantity: item.quantity,
-                priceAtOrder: menuItem.price,
-            });
-        }
 
         const order = await tx.order.create({
             data: {
@@ -77,9 +90,12 @@ export const createOrder = async (userId: string, data: CreateOrderInput) => {
         });
 
         return order;
-    });
+    }, { maxWait, timeout });
 
-    // 2. Enqueue order to kitchen queue strictly AFTER DB transaction commits.
+    // 2. Invalidate menu cache strictly AFTER DB commit because stockCount changed
+    await del(MENU_CACHE_KEY);
+
+    // 3. Enqueue order to kitchen queue strictly AFTER DB transaction commits.
     // Wrap enqueueOrder with a 2.5s timeout so order creation can NEVER hang on the queue.
     try {
         const enqueueWithTimeout = Promise.race([
@@ -95,6 +111,9 @@ export const createOrder = async (userId: string, data: CreateOrderInput) => {
             queueError?.message || queueError
         );
     }
+
+    // 4. S5: Emit real-time PLACED status strictly after DB transaction commits
+    await emitOrderStatus(order.userId, order.id, OrderStatus.PLACED);
 
     return order;
 };
@@ -187,7 +206,7 @@ export const updateOrderStatus = async (id: string, status: OrderStatus) => {
         );
     }
 
-    return await prisma.$transaction(async (tx) => {
+    const updatedOrder = await prisma.$transaction(async (tx) => {
         // Atomic status update: only updates if the current status matches what was read
         const updateResult = await tx.order.updateMany({
             where: {
@@ -234,4 +253,14 @@ export const updateOrderStatus = async (id: string, status: OrderStatus) => {
             },
         });
     });
+
+    // S5: Emit real-time status strictly after DB transaction commits and update succeeded
+    await emitOrderStatus(existingOrder.userId, id, status);
+
+    // Invalidate menu cache strictly AFTER DB commit if order cancellation restored stock
+    if (status === OrderStatus.CANCELLED) {
+        await del(MENU_CACHE_KEY);
+    }
+
+    return updatedOrder;
 };

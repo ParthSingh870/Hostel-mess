@@ -1,9 +1,11 @@
 import 'dotenv/config';
+import http from 'http';
 import express from 'express';
 import prisma from './config/prisma.js';
 import authRoutes from './routes/auth.routes.js';
 import menuRoutes from './routes/menu.routes.js';
 import orderRoutes from './routes/order.routes.js';
+import { initSocketServer } from './realtime/socket.js';
 
 if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET || !process.env.REDIS_URL) {
     console.error('FATAL: JWT_SECRET, JWT_REFRESH_SECRET, and REDIS_URL must be defined in environment variables.');
@@ -34,6 +36,12 @@ app.use('/api/auth', authRoutes);
 app.use('/api/menu', menuRoutes);
 app.use('/api/orders', orderRoutes);
 
-app.listen(PORT, () => {
+// Create standard Node HTTP server wrapping Express
+const server = http.createServer(app);
+
+// Attach Socket.io to the HTTP server
+initSocketServer(server);
+
+server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
