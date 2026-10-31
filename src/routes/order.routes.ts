@@ -8,12 +8,14 @@ import {
 } from '../controllers/order.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { authorize } from '../middlewares/rbac.middleware.js';
+import { orderRateLimiter } from '../middlewares/rateLimiter.middleware.js';
 import { Role } from '@prisma/client';
 
 const router = Router();
 
 // Student routes
-router.post('/', authenticate, authorize(Role.STUDENT), placeOrder);
+// orderRateLimiter runs strictly AFTER authentication so req.user.userId is verified
+router.post('/', authenticate, authorize(Role.STUDENT), orderRateLimiter, placeOrder);
 router.get('/my', authenticate, authorize(Role.STUDENT), getMyOrders);
 
 // Staff & Admin routes
