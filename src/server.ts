@@ -6,6 +6,7 @@ import authRoutes from './routes/auth.routes.js';
 import menuRoutes from './routes/menu.routes.js';
 import orderRoutes from './routes/order.routes.js';
 import { initSocketServer } from './realtime/socket.js';
+import { notFoundHandler, errorHandler } from './middlewares/error.middleware.js';
 
 if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET || !process.env.REDIS_URL) {
     console.error('FATAL: JWT_SECRET, JWT_REFRESH_SECRET, and REDIS_URL must be defined in environment variables.');
@@ -35,6 +36,12 @@ app.get('/health', async (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/menu', menuRoutes);
 app.use('/api/orders', orderRoutes);
+
+// 404 handler for unknown routes (registered after all routes, before error middleware)
+app.use(notFoundHandler);
+
+// Centralized global error middleware (registered last)
+app.use(errorHandler);
 
 // Create standard Node HTTP server wrapping Express
 const server = http.createServer(app);
