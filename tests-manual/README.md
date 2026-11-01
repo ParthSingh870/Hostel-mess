@@ -21,6 +21,7 @@ Each script dynamically resolves `.env` from the project root (`../.env`) and us
 ### 1. `test-all.ts`
 - **What it does:** Complete 24-step end-to-end integration test covering Health check, Registration validations, Login authentication, RBAC authorization, Menu CRUD & soft-delete, Order placement, State machine transitions, Stock auto-restoration, and Deactivated item restrictions.
 - **Database Impact:** Creates test users, test menu items, and test orders.
+- **Note:** Run `test:manual:suite` with the BullMQ worker stopped.
 - **How to run:**
   ```bash
   # From project root:
