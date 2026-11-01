@@ -4,13 +4,21 @@ import { OrderStatus } from '@prisma/client';
 import { enqueueOrder } from '../queues/kitchen.queue.js';
 import { emitOrderStatus } from '../realtime/emitOrderStatus.js';
 import { del, MENU_CACHE_KEY } from '../cache/cache.js';
+import {
+    BusinessError,
+    ItemUnavailableError,
+    OrderNotFoundError,
+    InvalidStatusTransitionError,
+    NotFoundError,
+    ConflictError,
+} from '../errors/AppError.js';
 
-export class BusinessError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = 'BusinessError';
-    }
-}
+export {
+    BusinessError,
+    ItemUnavailableError,
+    OrderNotFoundError,
+    InvalidStatusTransitionError,
+};
 
 export const createOrder = async (userId: string, data: CreateOrderInput) => {
     const maxWait = Number(process.env.ORDER_TX_MAX_WAIT_MS) || 5000;
@@ -28,11 +36,11 @@ export const createOrder = async (userId: string, data: CreateOrderInput) => {
                 });
 
                 if (!menuItem) {
-                    throw new Error('Menu item not found');
+                    throw new NotFoundError('Menu item not found');
                 }
 
                 if (!menuItem.isAvailable) {
-                    throw new BusinessError(`Item "${menuItem.name}" is currently unavailable`);
+                    throw new ItemUnavailableError(`Item "${menuItem.name}" is currently unavailable`);
                 }
 
                 // Atomic conditional decrement: prevents race conditions and negative stock
@@ -52,7 +60,7 @@ export const createOrder = async (userId: string, data: CreateOrderInput) => {
                 });
 
                 if (updated.count === 0) {
-                    throw new BusinessError(
+                    throw new ItemUnavailableError(
                         `Insufficient stock for "${menuItem.name}". Available: ${menuItem.stockCount}, Requested: ${item.quantity}`
                     );
                 }
@@ -66,31 +74,33 @@ export const createOrder = async (userId: string, data: CreateOrderInput) => {
                 });
             }
 
-        const order = await tx.order.create({
-            data: {
-                userId,
-                totalPrice,
-                status: 'PLACED',
-                items: {
-                    create: orderItemsToCreate,
+            const order = await tx.order.create({
+                data: {
+                    userId,
+                    totalPrice,
+                    status: 'PLACED',
+                    items: {
+                        create: orderItemsToCreate,
+                    },
                 },
-            },
-            include: {
-                items: {
-                    include: {
-                        menuItem: {
-                            select: {
-                                name: true,
-                                price: true,
+                include: {
+                    items: {
+                        include: {
+                            menuItem: {
+                                select: {
+                                    name: true,
+                                    price: true,
+                                },
                             },
                         },
                     },
                 },
-            },
-        });
+            });
 
-        return order;
-    }, { maxWait, timeout });
+            return order;
+        },
+        { maxWait, timeout }
+    );
 
     // 2. Invalidate menu cache strictly AFTER DB commit because stockCount changed
     await del(MENU_CACHE_KEY);
@@ -142,7 +152,7 @@ export const getMyOrders = async (userId: string) => {
     });
 };
 
-// Staff / Admin: Sabhi orders fetch karne ke liye service (paginated)
+// Staff / Admin: Sabhi orders fetch karne ke liye function (optional status filter aur pagination ke sath)
 export const getAllOrders = async (
     status?: OrderStatus,
     page: number = 1,
@@ -196,12 +206,12 @@ export const updateOrderStatus = async (id: string, status: OrderStatus) => {
     });
 
     if (!existingOrder) {
-        throw new Error('Order not found');
+        throw new OrderNotFoundError('Order not found');
     }
 
     const allowed = ALLOWED_TRANSITIONS[existingOrder.status];
     if (!allowed || !allowed.includes(status)) {
-        throw new Error(
+        throw new InvalidStatusTransitionError(
             `Invalid status transition from "${existingOrder.status}" to "${status}"`
         );
     }
@@ -219,7 +229,7 @@ export const updateOrderStatus = async (id: string, status: OrderStatus) => {
         });
 
         if (updateResult.count === 0) {
-            throw new Error('Order status was modified concurrently');
+            throw new ConflictError('Order status was modified concurrently');
         }
 
         // Stock is restored only on a valid cancellation that successfully updated the order

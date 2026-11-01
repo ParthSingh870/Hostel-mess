@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { Role } from '@prisma/client';
+import { UnauthorizedError } from '../errors/AppError.js';
 
 export interface AuthRequest extends Request {
     user?: {
@@ -9,11 +10,11 @@ export interface AuthRequest extends Request {
     };
 }
 
-export const authenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
+export const authenticate = (req: AuthRequest, _res: Response, next: NextFunction) => {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ message: 'Unauthorized: Token missing' });
+        throw new UnauthorizedError('Unauthorized: Token missing');
     }
 
     const token = authHeader.split(' ')[1];
@@ -26,6 +27,6 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
         req.user = decoded;
         next();
     } catch (error) {
-        return res.status(401).json({ message: 'Unauthorized: Invalid or expired token' });
+        throw new UnauthorizedError('Unauthorized: Invalid or expired token');
     }
 };
