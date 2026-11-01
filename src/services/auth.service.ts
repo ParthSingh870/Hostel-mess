@@ -1,7 +1,14 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import { Prisma } from '@prisma/client';
 import prisma from '../config/prisma.js';
 import { RegisterInput, LoginInput } from '../validators/auth.validator.js';
+import {
+    AppError,
+    ConflictError,
+    UnauthorizedError,
+    NotFoundError,
+} from '../errors/AppError.js';
 
 // Define the payload structure
 interface TokenPayload {
@@ -33,28 +40,36 @@ export const registerUser = async (data: RegisterInput) => {
     });
 
     if (existingUser) {
-        throw new Error('User already exists with this email');
+        throw new ConflictError('User already exists with this email');
     }
 
     const hashedPassword = await bcrypt.hash(data.password, 10);
 
-    const user = await prisma.user.create({
-        data: {
-            name: data.name,
-            email: data.email,
-            password: hashedPassword,
-            role: 'STUDENT', // Hardcoded: Public registration can only create STUDENT accounts
-        },
-        select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
-            createdAt: true,
-        },
-    });
+    try {
+        const user = await prisma.user.create({
+            data: {
+                name: data.name,
+                email: data.email,
+                password: hashedPassword,
+                role: 'STUDENT', // Hardcoded: Public registration can only create STUDENT accounts
+            },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                role: true,
+                createdAt: true,
+            },
+        });
 
-    return user;
+        return user;
+    } catch (error) {
+        // Handle concurrent registration race condition (P2002)
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+            throw new ConflictError('User already exists with this email');
+        }
+        throw error;
+    }
 };
 
 export const loginUser = async (data: LoginInput) => {
@@ -63,12 +78,12 @@ export const loginUser = async (data: LoginInput) => {
     });
 
     if (!user) {
-        throw new Error('Invalid email or password');
+        throw new AppError('Invalid email or password', 400);
     }
 
     const isPasswordValid = await bcrypt.compare(data.password, user.password);
     if (!isPasswordValid) {
-        throw new Error('Invalid email or password');
+        throw new AppError('Invalid email or password', 400);
     }
 
     // Generate short-lived access token (15m) and refresh token (7d)
@@ -121,7 +136,7 @@ export const refreshAccessToken = async (refreshToken: string) => {
             process.env.JWT_REFRESH_SECRET as string
         ) as TokenPayload;
     } catch (error) {
-        throw new Error('Invalid or expired refresh token');
+        throw new UnauthorizedError('Invalid or expired refresh token');
     }
 
     // 2. Check token in database and ensure it has not been revoked
@@ -130,7 +145,7 @@ export const refreshAccessToken = async (refreshToken: string) => {
     });
 
     if (!tokenRecord || tokenRecord.revoked || tokenRecord.expiresAt < new Date()) {
-        throw new Error('Invalid or revoked refresh token');
+        throw new UnauthorizedError('Invalid or revoked refresh token');
     }
 
     // 3. Ensure user still exists in database
@@ -139,7 +154,7 @@ export const refreshAccessToken = async (refreshToken: string) => {
     });
 
     if (!user) {
-        throw new Error('User not found');
+        throw new UnauthorizedError('User not found');
     }
 
     // 4. Issue new short-lived access token
@@ -154,7 +169,7 @@ export const revokeRefreshToken = async (refreshToken: string) => {
     });
 
     if (!tokenRecord) {
-        throw new Error('Refresh token not found');
+        throw new NotFoundError('Refresh token not found');
     }
 
     await prisma.refreshToken.update({

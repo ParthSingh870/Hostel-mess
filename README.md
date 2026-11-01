@@ -121,7 +121,54 @@ Measured using `npm run bench:menu` and `npm run bench:menu:down` against the li
 
 ---
 
+## Error Response Format
+
+All error responses across the application follow a standard, predictable JSON structure:
+
+- **General Errors (4xx / 5xx):**
+  ```json
+  {
+    "message": "Human-readable error description"
+  }
+  ```
+
+- **Validation Errors (400 Bad Request):**
+  ```json
+  {
+    "message": "Validation failed",
+    "errors": [
+      {
+        "field": "items.0.quantity",
+        "message": "Quantity must be at least 1"
+      }
+    ]
+  }
+  ```
+
+- **Rate Limiting (429 Too Many Requests):**
+  ```json
+  {
+    "error": "Too Many Requests",
+    "message": "Order rate limit exceeded. You can only place 5 orders per 60 seconds.",
+    "retryAfterSeconds": 60
+  }
+  ```
+
+- **Security & Path Masking:** Unknown 500 server errors log the complete stack trace server-side and always return a generic `{"message": "Internal server error"}` to clients, ensuring zero leak of system file paths or internal DB details.
+
+---
+
+## Known Limitations
+
+- **No Unified Success Envelope:** Success responses return data directly (e.g. raw array for `GET /api/menu`, or `{ data, meta }` for paginated orders) rather than a uniform `{ success: true, data }` envelope to preserve backwards-compatibility with existing tests and client consumers.
+- **Geographical Latency:** WAN roundtrips to remote Neon PostgreSQL in `us-east-2` add ~270ms RTT per database query; local Redis cache mitigation handles catalog queries in ~3ms.
+
+---
+
 ## Testing
+
+> [!IMPORTANT]
+> Run `test:manual:suite` with the BullMQ worker stopped.
 
 Manual and concurrency test scripts are located in `tests-manual/`:
 ```bash
