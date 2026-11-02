@@ -15,6 +15,7 @@ A resilient, scalable backend service for managing hostel mess operations, meal 
 - **In-Memory Store & Cache:** Redis 7 (Docker)
 - **Background Jobs:** BullMQ Kitchen Processing Worker
 - **Real-Time Updates:** Socket.io with Redis Adapter & Private User Rooms
+- **Automated Testing:** Vitest, Supertest
 
 ---
 
@@ -37,6 +38,9 @@ PORT=3000
 JWT_SECRET="your_strong_jwt_access_secret"
 JWT_REFRESH_SECRET="your_strong_jwt_refresh_secret"
 REDIS_URL="redis://localhost:6379"
+
+# Test Database connection string (for automated regression tests)
+TEST_DATABASE_URL="postgresql://user:password@test-branch-host/dbname?sslmode=require"
 
 # Cache & Rate Limiting Configuration
 MENU_CACHE_TTL_SECONDS=60
@@ -85,7 +89,7 @@ npx prisma generate
 
 ---
 
-## Core Features (Steps 1 to 7)
+## Core Features (Steps 1 to 8)
 
 1. **Authentication & RBAC:** Secure registration and login issuing access (15m) and refresh (7d) tokens. Enforces `STUDENT`, `STAFF`, and `ADMIN` roles.
 2. **Menu Management:** Full CRUD on mess menu catalog with Zod validation, price/stock updates, and soft-deactivation.
@@ -97,6 +101,7 @@ npx prisma generate
    - **Cache-Aside (`menu:all`):** Fast in-memory catalog serving with proactive invalidation on every menu write, order creation, manual cancel, and worker auto-cancel.
    - **Atomic Rate Limiter (`POST /orders`):** Hand-rolled atomic Lua script rate limiter (5 orders/60s) strictly by verified `userId` returning HTTP 429 with `Retry-After`.
    - **Fail-Open Architecture:** Dedicated isolated Redis connection (`enableOfflineQueue: false` with 1s timeout) ensuring zero downtime if Redis goes offline.
+8. **Production-Ready Error Architecture:** Centralized error handling middleware with domain-specific `AppError` subclasses, structured Zod error payloads, and strict server-side masking for 500 errors.
 
 ---
 
@@ -166,6 +171,44 @@ All error responses across the application follow a standard, predictable JSON s
 ---
 
 ## Testing
+
+### Automated Regression Test Suite (Step 9)
+
+A comprehensive automated test suite powered by **Vitest** and **Supertest** covering critical security, transactional, and architectural paths where a silent bug would cause severe damage.
+
+#### Prerequisites for Running Automated Tests:
+1. **Isolated Test Database:** Create an isolated Neon branch (e.g. `test`) and configure its connection string in `.env` as `TEST_DATABASE_URL`.
+2. **Redis Running:** Ensure the Redis container is running (`docker start hostel-redis`). Tests automatically use Redis DB index 1 (`/1`) to protect development Redis keys.
+3. **Worker Stopped:** The background BullMQ worker must **NOT** be running (`enqueueOrder` is cleanly mocked so tests run instantly without background worker dependencies).
+
+#### Safety & Isolation Guarantees:
+- **Dev DB Guard (`tests/setup.ts`):** Fails fast immediately if `TEST_DATABASE_URL` is missing or identical to `DATABASE_URL`. Tests will **NEVER** touch or modify the development database.
+- **Redis Isolation:** Tests are routed to Redis database index 1. Tests never invoke `FLUSHALL` or `FLUSHDB`.
+- **Serial Execution:** Database-touching test suites execute serially (`fileParallelism: false`) with generous 30s timeouts to prevent cross-suite concurrency collisions on remote serverless databases.
+- **Mocks vs Real Components:**
+  - *Mocked:* BullMQ queue enqueuing (`enqueueOrder`) and Socket.io realtime broadcasts (`emitOrderStatus`).
+  - *Real:* PostgreSQL database transactions (`$transaction`), PostgreSQL `CHECK ("stockCount" >= 0)` constraint, JWT auth & bcrypt hashing, Zod schema validation, centralized `AppError` handlers, and the atomic Redis Lua script rate limiter.
+
+#### Running Automated Tests:
+```bash
+# Run all automated test suites serially
+npm test
+
+# Run tests in interactive watch mode
+npm run test:watch
+
+# Run a specific test file:
+npm test tests/smoke.test.ts               # Health check and 404 handler
+npm test tests/auth.test.ts                # Register, login, refresh, logout, token expiry
+npm test tests/menu.test.ts                # RBAC guards, menu CRUD, partial patch, soft-delete
+npm test tests/order.test.ts               # Stock decrement & concurrent order race condition
+npm test tests/order-status.test.ts        # Lifecycle transitions & double-cancel race condition
+npm test tests/error-and-ratelimit.test.ts # Error shapes, path masking & atomic Lua rate limiter
+```
+
+---
+
+### Manual & Stress Test Scripts
 
 > [!IMPORTANT]
 > Run `test:manual:suite` with the BullMQ worker stopped.
