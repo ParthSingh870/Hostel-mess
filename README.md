@@ -1,6 +1,14 @@
 # Hostel Mess Backend
 
+[![CI Test Suite](https://github.com/ParthSingh870/Hostel-mess/actions/workflows/test.yml/badge.svg)](https://github.com/ParthSingh870/Hostel-mess/actions/workflows/test.yml)
+
 > A reliable learning project with known limitations, demonstrating robust containerized backend patterns for hostel mess operations, concurrent order placement, asynchronous job queues, and real-time order tracking.
+
+---
+
+## Live Demo
+
+Coming soon after hosting
 
 ---
 
@@ -19,9 +27,9 @@ This system addresses these challenges through isolated transactions, atomic con
 ## Architecture Diagram
 
 ```mermaid
-flowchart TD
+graph TD
     subgraph Clients["Client Layer"]
-        Student["Student (Web / Mobile)"]
+        Student["Student Web / Mobile"]
         Staff["Staff / Admin"]
     end
 
@@ -31,33 +39,33 @@ flowchart TD
             RateLimiter["Lua Atomic Rate Limiter"]
             MenuController["Menu Controller (Cache-Aside)"]
             OrderController["Order Controller (Atomic Tx)"]
-            SocketServer["Socket.io Server (Rooms: user:id)"]
+            SocketServer["Socket.io Server<br/>(@socket.io/redis-adapter)"]
         end
 
         subgraph WorkerService["worker: BullMQ Kitchen Worker"]
-            KitchenWorker["Worker Process (Concurrency: 3)"]
+            KitchenWorker["Worker Process<br/>(Concurrency: 3)"]
         end
 
         subgraph Infra["Infrastructure Services"]
-            RedisSvc[("redis: Redis 7 Alpine\n(Cache, BullMQ Queue, Socket Pub/Sub)")]
-            PostgresSvc[("postgres: PostgreSQL 16 Alpine\n(Relational Store & Check Constraints)")]
-            MigrateSvc["migrate: One-Shot Service\n(npx prisma migrate deploy)"]
+            RedisSvc[("redis: Redis 7 Alpine<br/>Cache, Queues & Pub/Sub")]
+            PostgresSvc[("postgres: PostgreSQL 16 Alpine<br/>Relational Database")]
+            MigrateSvc["migrate: One-Shot Service<br/>(prisma migrate deploy)"]
         end
     end
 
-    Student -->|HTTP REST / WebSocket| AppService
-    Staff -->|HTTP REST / WebSocket| AppService
+    Student -->|"HTTP REST & WebSocket"| AppService
+    Staff -->|"HTTP REST & WebSocket"| AppService
 
-    AppService -->|Cache Check & Rate Limit| RedisSvc
-    AppService -->|Enqueue Cooking Job| RedisSvc
-    AppService -->|Read / Write Tx| PostgresSvc
-    AppService -->|Redis Adapter Pub/Sub| RedisSvc
+    AppService -->|"Cache Check & Rate Limit"| RedisSvc
+    AppService -->|"Enqueue Cooking Job"| RedisSvc
+    AppService -->|"Read / Write Transaction"| PostgresSvc
+    AppService <-->|"Redis Pub/Sub (Socket.io Adapter)"| RedisSvc
 
-    WorkerService -->|Pop Job BLMOVE| RedisSvc
-    WorkerService -->|Atomic State Update| PostgresSvc
-    WorkerService -->|Emit Status (PREPARING/READY)| RedisSvc
+    WorkerService -->|"Consume Cooking Job"| RedisSvc
+    WorkerService -->|"Atomic State Update"| PostgresSvc
+    WorkerService -->|"Emit Status (PREPARING/READY) via Redis Emitter"| RedisSvc
 
-    MigrateSvc -->|Deploy Migrations First| PostgresSvc
+    MigrateSvc -->|"Deploy Migrations First"| PostgresSvc
 ```
 
 ---
@@ -91,8 +99,8 @@ A newcomer requires **ONLY** two tools installed on their host operating system:
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/your-username/hostel-mess-backend.git
-   cd hostel-mess-backend
+   git clone https://github.com/ParthSingh870/Hostel-mess.git
+   cd Hostel-mess
    ```
 
 2. **Copy the environment template:**
