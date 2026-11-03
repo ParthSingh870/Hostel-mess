@@ -9,6 +9,7 @@
     "dev:worker": "tsx src/workers/kitchen.worker.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "start:worker": "node dist/workers/kitchen.worker.js",
     "test:manual:suite": "tsx tests-manual/test-all.ts",
     "test:manual:dupe": "node tests-manual/test_dupe.cjs",
     "test:manual:concurrency": "node tests-manual/test_concurrent_order.cjs",
@@ -45,7 +46,6 @@
     "@types/node": "^22.20.2",
     "@types/supertest": "^7.2.1",
     "@types/ws": "^8.18.1",
-    "prisma": "^5.22.0",
     "socket.io-client": "^4.8.4",
     "supertest": "^7.3.1",
     "tsx": "^4.23.13",
@@ -64,6 +64,7 @@
     "express": "^5.2.1",
     "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
+    "prisma": "^5.22.0",
     "socket.io": "^4.8.4",
     "ws": "^8.21.3",
     "zod": "^4.6.2"
