@@ -1,0 +1,126 @@
+services:
+  # -------------------------------------------------------------
+  # 1. PostgreSQL Database Service
+  # -------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: hostel-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-hostel_mess}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-hostel_mess}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # -------------------------------------------------------------
+  # 2. Redis In-Memory Cache, Queue & PubSub Service
+  # -------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: hostel-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # -------------------------------------------------------------
+  # 3. One-Shot Database Migration Runner
+  # Applies pending Prisma migrations and exits cleanly
+  # -------------------------------------------------------------
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hostel-mess-backend:latest
+    container_name: hostel-migrate
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/hostel_mess?schema=public}
+    command: npx prisma migrate deploy
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # -------------------------------------------------------------
+  # 4. Express HTTP & Socket.io Application API Server
+  # -------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hostel-mess-backend:latest
+    container_name: hostel-app
+    restart: unless-stopped
+    command: node dist/server.js
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/hostel_mess?schema=public}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      JWT_SECRET: ${JWT_SECRET:-local_dev_jwt_secret_key_fake_12345}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-local_dev_jwt_refresh_secret_key_fake_12345}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      MENU_CACHE_TTL_SECONDS: ${MENU_CACHE_TTL_SECONDS:-60}
+      ORDER_RATE_LIMIT_MAX: ${ORDER_RATE_LIMIT_MAX:-5}
+      ORDER_RATE_LIMIT_WINDOW_SECONDS: ${ORDER_RATE_LIMIT_WINDOW_SECONDS:-60}
+      ORDER_TX_MAX_WAIT_MS: ${ORDER_TX_MAX_WAIT_MS:-5000}
+      ORDER_TX_TIMEOUT_MS: ${ORDER_TX_TIMEOUT_MS:-10000}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # -------------------------------------------------------------
+  # 5. BullMQ Background Kitchen Worker Process
+  # Same image as app, running independent cooking job queue
+  # -------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hostel-mess-backend:latest
+    container_name: hostel-worker
+    restart: unless-stopped
+    command: node dist/workers/kitchen.worker.js
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/hostel_mess?schema=public}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      KITCHEN_PREP_SECONDS: ${KITCHEN_PREP_SECONDS:-5}
+      SIMULATE_WORKER_FAILURE: ${SIMULATE_WORKER_FAILURE:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
+  redis_data:
