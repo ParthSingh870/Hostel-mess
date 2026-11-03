@@ -1,0 +1,77 @@
+name: CI Test Suite
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run Vitest Suite
+    runs-on: ubuntu-latest
+
+    # Service containers: Spin up ephemeral PostgreSQL and Redis inside GitHub Actions VM
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hostel_mess_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    # Safe test environment variables (no real secrets committed)
+    # URLs do not contain 'neon.tech', instructing src/config/prisma.ts to use local pg mode (direct PrismaClient)
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/hostel_mess_dev?schema=public
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/hostel_mess_test?schema=public
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci_test_super_secret_jwt_key_fake_12345
+      JWT_REFRESH_SECRET: ci_test_super_secret_refresh_jwt_key_fake_12345
+      ORDER_RATE_LIMIT_MAX: "1000"
+      ORDER_RATE_LIMIT_WINDOW_SECONDS: "60"
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4.2.0
+        with:
+          node-version: 22
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Apply Migrations to Test Database
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/hostel_mess_test?schema=public
+
+      - name: Run Vitest Suite (26 Tests)
+        run: npm test
