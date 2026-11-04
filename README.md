@@ -81,7 +81,7 @@ graph TD
 - **Real-Time Communication:** Socket.io 4 with `@socket.io/redis-adapter`
 - **Validation:** Zod
 - **Containerization:** Multi-Stage Dockerfile (Alpine), Docker Compose
-- **CI Pipeline:** GitHub Actions with native Service Containers (`postgres:16-alpine`, `redis:7-alpine`) (CI duration: to be measured after first Actions run)
+- **CI Pipeline:** GitHub Actions with native Service Containers (`postgres:16-alpine`, `redis:7-alpine`) (CI duration: ~31s on GitHub Actions Ubuntu runner)
 - **Automated Testing:** Vitest 5, Supertest 7
 
 ---
