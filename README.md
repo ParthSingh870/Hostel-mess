@@ -37,7 +37,7 @@ graph TD
         subgraph AppService["app: Express & Socket.io (Port 3000)"]
             AuthMod["Auth & RBAC Middleware"]
             RateLimiter["Lua Atomic Rate Limiter"]
-            MenuController["Menu Controller (Cache-Aside)"]
+            MenuController["Menu Controller<br/>(Cache-Aside, 60s TTL)"]
             OrderController["Order Controller (Atomic Tx)"]
             SocketServer["Socket.io Server<br/>(@socket.io/redis-adapter)"]
         end
@@ -81,7 +81,7 @@ graph TD
 - **Real-Time Communication:** Socket.io 4 with `@socket.io/redis-adapter`
 - **Validation:** Zod
 - **Containerization:** Multi-Stage Dockerfile (Alpine), Docker Compose
-- **CI Pipeline:** GitHub Actions with native Service Containers (`postgres:16-alpine`, `redis:7-alpine`)
+- **CI Pipeline:** GitHub Actions with native Service Containers (`postgres:16-alpine`, `redis:7-alpine`) (CI duration: to be measured after first Actions run)
 - **Automated Testing:** Vitest 5, Supertest 7
 
 ---
@@ -117,7 +117,7 @@ A newcomer requires **ONLY** two tools installed on their host operating system:
    docker compose up --build -d
    ```
    *What happens behind the scenes:*
-   - Docker builds the lean Alpine image (`hostel-mess-backend:latest`).
+   - Docker builds the multi-stage Alpine image (`hostel-mess-backend:latest`, ~107MB compressed content, ~417MB on disk).
    - `postgres` and `redis` start and run automated healthchecks.
    - The one-shot `migrate` service runs `prisma migrate deploy` to prepare the database schema.
    - `app` (Express API) and `worker` (BullMQ Kitchen Worker) start up in dependency order.
@@ -165,13 +165,13 @@ Order placement touches multiple database rows: decrementing inventory stock on 
 - If any menu item lacks sufficient stock, the entire transaction rolls back completely.
 
 ### 2. Why a Queue with Concurrency Limits?
-A real kitchen cannot prepare 500 meals simultaneously. Pushing incoming orders into a BullMQ queue with `concurrency: 3` enforces controlled kitchen throughput:
+A real kitchen cannot prepare arbitrary numbers of meals simultaneously. Pushing incoming orders into a BullMQ queue with `concurrency: 3` enforces controlled kitchen throughput:
 - Prevents database connection exhaustion during peak order spikes.
 - Decouples student order acceptance (instant HTTP 201 response) from meal preparation.
 - Provides built-in crash recovery (stalled jobs are recovered and resumed if a worker process crashes mid-cooking).
 
 ### 3. Why Redis Caching and Rate Limiting?
-- **Menu Cache-Aside (`menu:all`):** Mess menus change infrequently (e.g. daily or weekly), but are viewed thousands of times by hungry students. Caching the serialized catalog in Redis RAM reduces response latency from ~280ms down to ~3ms (over 70x faster).
+- **Menu Cache-Aside (`menu:all`):** Mess menus change infrequently, but are viewed repeatedly by students. Caching the serialized catalog in Redis RAM with a 60-second TTL (`MENU_CACHE_TTL_SECONDS=60` in code and `.env`) reduces response latency from ~280ms down to ~3.9ms (over 71x faster on median in benchmarks).
 - **Atomic Lua Rate Limiter:** Protects the order creation endpoint from spam or denial-of-service. An atomic Lua script checks and increments user order counts in a single Redis evaluation step, eliminating read-modify-write race conditions.
 
 ### 4. Why Fail-Open?
@@ -198,8 +198,10 @@ The following latency metrics were measured on `GET /api/menu` (N=30 requests) u
 | **p95** | 292.86 ms | 5.88 ms | 286.32 ms | **49.8x** |
 | **Average** | 281.70 ms | 3.89 ms | 279.14 ms | **72.4x** |
 
+*Measurement Conditions:* Sample size N=30 requests executed via `tests-manual/bench-menu.ts` from local client (`http://127.0.0.1:3000`), querying remote Neon PostgreSQL (`neondb` in AWS region `us-east-2`) over WAN, with Redis running locally (`localhost:6379`). "Uncached" (Cache MISS) means Redis key `menu:all` is explicitly deleted before each request to force a direct PostgreSQL query.
+
 > [!NOTE]
-> *Latency Context:* Development connects over WAN to remote Neon PostgreSQL in AWS `us-east-2` (~270ms–290ms RTT per database query). Serving the catalog directly from local Redis RAM reduces response latency to ~3ms–5ms (**50.5x to 71.1x faster** on median, and up to **129.9x** on min). When Redis is stopped, fail-open fallback latency remains stable (~266ms–279ms) without hanging or failing requests.
+> *Latency Context:* Development connects over WAN to remote Neon PostgreSQL in AWS `us-east-2` (~270ms–290ms per-request latency). Serving the catalog directly from local Redis RAM yields measured response latencies of 2.07ms (min) and 3.94ms (median), achieving **71.1x faster** response times on median (and up to **129.9x** on min). When Redis is stopped, fail-open fallback latency remains stable (~266ms–279ms) without hanging or failing requests.
 
 ---
 
@@ -212,6 +214,6 @@ This system is an educational, reliable learning project with known design const
 3. **At-Least-Once Delivery:** BullMQ operates under at-least-once delivery semantics. Handlers must maintain idempotent status transitions (e.g. conditional `updateMany` checking current status) to prevent double-processing.
 4. **Offline WebSocket Events are Dropped:** Socket.io emits events over ephemeral pub/sub channels. If a student is offline or disconnected when their order transitions to `READY`, the event is dropped. Clients must query `GET /api/orders/my` on reconnect.
 5. **Stock Failure Returns 400 Instead of 409:** When menu stock is insufficient, the API returns HTTP `400 Bad Request` rather than HTTP `409 Conflict` to preserve strict compatibility with the existing test suite contract.
-6. **Unconfirmed T6 Concurrency 400 Cause:** Under extreme concurrent order stress tests (test T6), occasional 400 errors occur whose root cause remains unconfirmed under high connection pressure.
+6. **Order Endpoint Error Handling Under Concurrency:** Under concurrent bursts (e.g. the concurrent last-stock race test, test_concurrent_order), two distinct error outcomes can occur depending on code path: (a) Prisma interactive transaction timeout or pool queue exhaustion (`ORDER_TX_MAX_WAIT_MS=5000`, `ORDER_TX_TIMEOUT_MS=10000`) throws Prisma `P2028` or `P2024`, which `error.middleware.ts` maps to HTTP `503 Service Unavailable` ("Server is busy, please retry"); (b) Business stock depletion (e.g. concurrent race on menu stock) throws `ItemUnavailableError` in `order.service.ts`, which maps to HTTP `400 Bad Request` ("Insufficient stock for..."). HTTP 400 is never caused by transaction timeouts.
 7. **Remote Database Latency Slows Automated Tests:** Vitest suites run serially with 30s timeouts because remote WAN roundtrips to Neon PostgreSQL introduce significant per-query latency.
 8. **CI Tests Run on Local Postgres, Not Neon:** The GitHub Actions workflow executes against local `postgres:16-alpine` service containers. While this validates Prisma schema, migrations, and transactional integrity, it does not validate Neon's proprietary WebSocket serverless proxy in CI.
