@@ -209,6 +209,10 @@ export const updateOrderStatus = async (id: string, status: OrderStatus) => {
         throw new OrderNotFoundError('Order not found');
     }
 
+    if (existingOrder.status === status) {
+        throw new ConflictError('Order status was modified concurrently');
+    }
+
     const allowed = ALLOWED_TRANSITIONS[existingOrder.status];
     if (!allowed || !allowed.includes(status)) {
         throw new InvalidStatusTransitionError(
