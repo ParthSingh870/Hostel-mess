@@ -1,4 +1,5 @@
 import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { Prisma } from '@prisma/client';
 import prisma from '../config/prisma.js';
@@ -32,6 +33,11 @@ export const generateRefreshToken = (userId: string, role: string): string => {
         process.env.JWT_REFRESH_SECRET as string,
         { expiresIn: '7d' }
     );
+};
+
+// Helper to compute SHA-256 hex hash of refresh tokens before database storage or lookup
+export const hashToken = (token: string): string => {
+    return crypto.createHash('sha256').update(token).digest('hex');
 };
 
 export const registerUser = async (data: RegisterInput) => {
@@ -90,11 +96,11 @@ export const loginUser = async (data: LoginInput) => {
     const accessToken = generateAccessToken(user.id, user.role);
     const refreshToken = generateRefreshToken(user.id, user.role);
 
-    // Store refresh token in database for revocation tracking
+    // Store refresh token in database for revocation tracking (stored as SHA-256 hash)
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await prisma.refreshToken.create({
         data: {
-            token: refreshToken,
+            token: hashToken(refreshToken),
             userId: user.id,
             expiresAt,
         },
@@ -139,9 +145,9 @@ export const refreshAccessToken = async (refreshToken: string) => {
         throw new UnauthorizedError('Invalid or expired refresh token');
     }
 
-    // 2. Check token in database and ensure it has not been revoked
+    // 2. Check token in database and ensure it has not been revoked (lookup by SHA-256 hash)
     const tokenRecord = await prisma.refreshToken.findUnique({
-        where: { token: refreshToken },
+        where: { token: hashToken(refreshToken) },
     });
 
     if (!tokenRecord || tokenRecord.revoked || tokenRecord.expiresAt < new Date()) {
@@ -164,8 +170,9 @@ export const refreshAccessToken = async (refreshToken: string) => {
 };
 
 export const revokeRefreshToken = async (refreshToken: string) => {
+    const hashedToken = hashToken(refreshToken);
     const tokenRecord = await prisma.refreshToken.findUnique({
-        where: { token: refreshToken },
+        where: { token: hashedToken },
     });
 
     if (!tokenRecord) {
@@ -173,7 +180,7 @@ export const revokeRefreshToken = async (refreshToken: string) => {
     }
 
     await prisma.refreshToken.update({
-        where: { token: refreshToken },
+        where: { token: hashedToken },
         data: { revoked: true },
     });
 };
