@@ -376,7 +376,7 @@ Order placement touches multiple database rows: decrementing inventory stock on 
 A real kitchen cannot prepare arbitrary numbers of meals simultaneously. Pushing incoming orders into a BullMQ queue with `concurrency: 3` enforces controlled kitchen throughput:
 - Prevents database connection exhaustion during peak order spikes.
 - Decouples student order acceptance (instant HTTP 201 response) from meal preparation.
-- Provides built-in crash recovery (stalled jobs are recovered and resumed if a worker process crashes mid-cooking).
+- Provides built-in crash recovery: BullMQ stalled-job lock expiration allows a replacement worker to detect abandoned active jobs and resume cooking.
 
 ### 3. Why Redis Caching and Rate Limiting?
 - **Menu Cache-Aside (`menu:all`):** Mess menus change infrequently, but are viewed repeatedly by students. Caching the serialized catalog in Redis RAM with a 60-second TTL (`MENU_CACHE_TTL_SECONDS=60` in code and `.env`) reduces response latency from ~280ms down to ~3.9ms (over 71x faster on median in benchmarks).
@@ -406,7 +406,7 @@ The following latency metrics were measured on `GET /api/menu` (N=30 requests) u
 | **p95** | 292.86 ms | 5.88 ms | 286.32 ms | **49.8x** |
 | **Average** | 281.70 ms | 3.89 ms | 279.14 ms | **72.4x** |
 
-*Measurement Conditions:* Sample size N=30 requests executed via `tests-manual/bench-menu.ts` from local client (`http://127.0.0.1:3000`), querying remote Neon PostgreSQL (`neondb` in AWS region `us-east-2`) over WAN, with Redis running locally (`localhost:6379`).
+*Measurement Conditions:* Sample size N=30 requests executed via `tests-manual/bench-menu.ts` from local client (`http://127.0.0.1:3000`), querying remote Neon PostgreSQL (`neondb` in AWS region `us-east-2`) over WAN, with Redis running locally in Docker (`localhost:6379`). Redis was local Docker, Postgres was remote Neon us-east-2 from India, so the 71x speedup is local-Redis vs remote-Postgres and not a general figure.
 
 ---
 
@@ -449,14 +449,14 @@ The following latency metrics were measured on `GET /api/menu` (N=30 requests) u
 - **Kitchen Queue & Background Worker**:
   - BullMQ controlled concurrency (`concurrency: 3`): when 7 orders arrive simultaneously, at most 3 are in `PREPARING` state at any given moment.
   - Worker failure recovery: simulated cooking failures trigger 3 exponential retry attempts before marking the order `CANCELLED` and atomically restoring stock.
-  - Graceful shutdown on `SIGTERM`.
+  - Stalled-job recovery: after a hard kill (process tree) of the worker, a replacement worker moved the order to READY after 72.8 s (single run, local Docker, default BullMQ lock settings).
 - **Real-Time WebSockets (Socket.io)**:
   - Handshake authentication: missing or invalid JWT tokens are rejected.
   - Room isolation: each user automatically joins a private room matching their verified `userId`.
   - Real-time event delivery: status transitions (`PLACED`, `PREPARING`, `READY`) emit to the ordering student's private room; other connected sockets receive zero events.
 - **Resilience & Fail-Open**:
   - When Redis is stopped, `GET /api/menu` falls back to PostgreSQL (200 OK) without crashing.
-  - When Redis is stopped, `POST /api/orders` commits the order and stock decrement to PostgreSQL (201 Created) without hanging (enqueue failed without waiting for the 2.5 s guard; POST completed in ~55 ms on local Docker, not Neon).
+  - When Redis is stopped, `POST /api/orders` returned 201 in ~55 ms on local Docker (not Neon); the enqueue failed without waiting for the 2.5 s guard (verification-logs/J-resilience.txt).
 - **Containerization**:
   - Multi-stage Alpine Docker build produces minimal production images running as non-root user `node`.
   - Docker Compose full-stack startup, automatic migration execution, healthcheck readiness, and clean teardown.
@@ -465,7 +465,7 @@ The following latency metrics were measured on `GET /api/menu` (N=30 requests) u
 
 ### What is Not Tested / Untested Scenarios
 
-- **Stalled-Job Recovery Timing Under Abrupt Worker SIGKILL:** While BullMQ supports stalled-job lock expiration (default 30s lock duration and 30s stalled interval), clean testing without orphan background processes showed that an active job held by an abruptly killed worker did not automatically re-queue and reach READY within a 60-second observation window; end-to-end BullMQ stalled job recovery timing under abrupt worker process termination remains to be fully measured.
+- **Worker Graceful Shutdown on Windows:** SIGTERM handler exists in code; shutdown behaviour not verified on Windows due to OS process tree signalling limitations.
 - **Long-term Redis Memory Exhaustion**: Memory limits and LRU key eviction behavior under sustained multi-gigabyte cache load.
 - **Multi-Node Redis Clustering**: Failover behavior under Redis Sentinel or Redis Cluster topologies (currently tested against single-instance Redis).
 - **Multi-Instance Horizontal Scaling**: Session stickiness and multi-node WebSocket sync across multiple Express API replica containers behind an ingress load balancer.
@@ -477,7 +477,7 @@ The following latency metrics were measured on `GET /api/menu` (N=30 requests) u
 
 This system is an educational, reliable learning project with known design constraints:
 
-1. **Queue Job Loss During Redis Outage:** Because `queueRedisConfig` sets `enableOfflineQueue: false`, commands fail immediately when Redis is down instead of buffering in memory. The 2.5s `Promise.race` in `order.service.ts` acts as a safety guard. In a local Docker test (not Neon), `POST /api/orders` completed in ~55ms, safely committing the order and stock decrement to PostgreSQL. However, enqueue failed without waiting for the 2.5 s guard, and the BullMQ job was lost. The order remains in `PLACED` status in PostgreSQL and is not automatically enqueued for kitchen preparation. A Transactional Outbox Pattern or background reconciliation worker should be implemented to scan and re-enqueue orphaned `PLACED` orders once Redis recovers.
+1. **Queue Job Loss During Redis Outage:** Because `queueRedisConfig` sets `enableOfflineQueue: false`, commands fail immediately when Redis is down instead of buffering in memory. The 2.5s `Promise.race` in `order.service.ts` acts as a safety guard. In a local Docker test (not Neon), POST /api/orders returned 201 in ~55 ms on local Docker (not Neon); the enqueue failed without waiting for the 2.5 s guard (verification-logs/J-resilience.txt), and the BullMQ job was lost. The order remains in `PLACED` status in PostgreSQL and is not automatically enqueued for kitchen preparation. A Transactional Outbox Pattern or background reconciliation worker should be implemented to scan and re-enqueue orphaned `PLACED` orders once Redis recovers.
 2. **Refresh Token Plaintext Storage:** Refresh tokens are currently stored as raw plaintext JWT strings in the `RefreshToken` database table. Best practice is to store a cryptographic hash (e.g. SHA-256) of the token instead.
 3. **Refresh Token Rotation:** Refresh token exchange issues a new access token but reuses the existing refresh token until expiry or manual logout. Implementing Refresh Token Rotation (issuing a new refresh token and invalidating the old one on each refresh) would provide reuse detection.
 4. **WebSocket Token via Query Parameter:** While handshake `auth.token` is the primary transport, `socket.ts` falls back to `query.token`. Query parameters can inadvertently appear in server access logs and proxy history.
@@ -486,7 +486,7 @@ This system is an educational, reliable learning project with known design const
 7. **Offline WebSocket Events are Dropped:** Socket.io emits events over ephemeral pub/sub channels. If a student is offline or disconnected when their order transitions to `READY`, the event is dropped. Clients must query `GET /api/orders/my` on reconnect.
 8. **Pagination Gaps:** `GET /api/orders` supports pagination (`page`, `limit`), but `GET /api/menu` and `GET /api/orders/my` return all matching records without pagination. For large mess deployments, cursor or offset pagination should be added.
 9. **Idempotency Keys on Orders:** `POST /api/orders` does not accept a client-generated `Idempotency-Key` header. If a mobile client experiences a network timeout after the database commits but before the response arrives, a client retry could place a duplicate order.
-10. **Cloud Database Latency:** Measured latency: median ~278 ms per request from my laptop in India to Neon us-east-2 (N=30). Network roundtrips to remote cloud databases affect interactive transaction hold times under high load compared to co-located or local database instances.
+10. **Cloud Database Latency:** Measured latency: median 279.94 ms cache miss per request from my laptop in India to Neon us-east-2 (N=30). Network roundtrips to remote cloud databases affect interactive transaction hold times under high load compared to co-located or local database instances.
 11. **CI Tests Run on Local Postgres, Not Neon:** The GitHub Actions workflow executes against local `postgres:16-alpine` service containers. While this validates Prisma schema, migrations, and transactional integrity, it does not validate Neon's proprietary WebSocket serverless proxy in CI.
 
 ---
