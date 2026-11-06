@@ -1,5 +1,6 @@
 node_modules/
 dist/
+uploads/
 
 # Keep environment variables out of version control
 .env
@@ -8,6 +9,7 @@ dist/
 
 # Logs
 logs/
+verification-logs/
 *.log
 
 # Developer Notes
