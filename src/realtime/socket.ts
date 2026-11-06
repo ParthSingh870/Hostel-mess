@@ -35,12 +35,10 @@ export const initSocketServer = (httpServer: HttpServer): SocketIOServer => {
 
     // S2: Handshake JWT Authentication Middleware
     io.use((socket, next) => {
-        // Extract token from handshake auth object (primary), or fallback to headers/query
+        // Extract token strictly from handshake auth object (or standard Authorization header)
+        // Query parameter fallback is dropped to prevent tokens from appearing in server/proxy logs
         const token =
             socket.handshake.auth?.token ||
-            (typeof socket.handshake.query?.token === 'string'
-                ? socket.handshake.query.token
-                : undefined) ||
             socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, '');
 
         if (!token) {
