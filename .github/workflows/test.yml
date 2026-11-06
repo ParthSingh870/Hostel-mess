@@ -73,5 +73,5 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/hostel_mess_test?schema=public
 
-      - name: Run Vitest Suite (26 Tests)
+      - name: Run Vitest Suite (28 Tests)
         run: npm test

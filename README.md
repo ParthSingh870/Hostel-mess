@@ -291,7 +291,7 @@ npx prisma migrate deploy
 DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/hostel_mess_test?schema=public" npx prisma migrate deploy
 ```
 
-#### Step 3: Run the Vitest Suite (26 Tests)
+#### Step 3: Run the Vitest Suite (28 Tests)
 
 **Windows Command Prompt (CMD):**
 ```cmd
@@ -420,7 +420,7 @@ The following latency metrics were measured on `GET /api/menu` (N=30 requests) u
   - Security audit: npm audit clean at time of check.
   - Pattern scan: manual pattern scans of the working tree found no secrets; git history was checked for Neon credential prefixes, external database URLs, and .env was never committed.
 - **Automated Integration Tests (Vitest)**:
-  - 26 integration tests running across 6 test suites with 100% pass rate.
+  - 28 integration tests running across 6 test suites with 100% pass rate.
   - Concurrent order placement race conditions: exactly one request succeeds when competing for final item stock; the other receives 400.
   - Double cancellation race conditions: exactly one cancellation succeeds (200); subsequent cancellation returns 409 Conflict with stock restored strictly once.
 - **Manual Verification Suites**:
@@ -432,6 +432,7 @@ The following latency metrics were measured on `GET /api/menu` (N=30 requests) u
   - Public registration ignores client-supplied roles, strictly assigning `STUDENT`.
   - Wrong password and non-existent email return 400 with sanitized error messages.
   - Refresh token lifecycle: invalid, expired, and revoked refresh tokens return 401.
+  - Refresh token storage: stored strictly as SHA-256 hexadecimal hashes (64 characters) in the database, never as raw plaintext JWTs.
 - **Caching & Invalidation**:
   - `GET /api/menu` cache miss (`X-Cache: MISS`) on first call; subsequent calls hit Redis (`X-Cache: HIT`).
   - Cache TTL set to 60 seconds.
@@ -451,7 +452,7 @@ The following latency metrics were measured on `GET /api/menu` (N=30 requests) u
   - Worker failure recovery: simulated cooking failures trigger 3 exponential retry attempts before marking the order `CANCELLED` and atomically restoring stock.
   - Stalled-job recovery: after a hard kill (process tree) of the worker, a replacement worker moved the order to READY after 72.8 s (single run, local Docker, default BullMQ lock settings).
 - **Real-Time WebSockets (Socket.io)**:
-  - Handshake authentication: missing or invalid JWT tokens are rejected.
+  - Handshake authentication: missing or invalid JWT tokens are rejected; tokens must be provided strictly via `handshake.auth.token` (query parameter fallback is rejected).
   - Room isolation: each user automatically joins a private room matching their verified `userId`.
   - Real-time event delivery: status transitions (`PLACED`, `PREPARING`, `READY`) emit to the ordering student's private room; other connected sockets receive zero events.
 - **Resilience & Fail-Open**:
@@ -479,16 +480,14 @@ This system is an educational, reliable learning project with known design const
 
 1. **Authentication Rate Limiting:** While `POST /api/orders` enforces strict sliding-window rate limiting (5 orders per 60 seconds), authentication endpoints (`POST /api/auth/login`, `POST /api/auth/register`, `POST /api/auth/refresh`) currently have no rate limiting applied. An attacker could attempt brute-force credential stuffing against login endpoints. An IP- or email-based sliding window rate limiter should be implemented.
 2. **Queue Job Loss During Redis Outage:** Because `queueRedisConfig` sets `enableOfflineQueue: false`, commands fail immediately when Redis is down instead of buffering in memory. The 2.5s `Promise.race` in `order.service.ts` acts as a safety guard. In a local Docker test (not Neon), POST /api/orders returned 201 in ~55 ms on local Docker (not Neon); the enqueue failed without waiting for the 2.5 s guard (verification-logs/J-resilience.txt), and the BullMQ job was lost. The order remains in `PLACED` status in PostgreSQL and is not automatically enqueued for kitchen preparation. A Transactional Outbox Pattern or background reconciliation worker should be implemented to scan and re-enqueue orphaned `PLACED` orders once Redis recovers.
-3. **Refresh Token Plaintext Storage:** Refresh tokens are currently stored as raw plaintext JWT strings in the `RefreshToken` database table. Best practice is to store a cryptographic hash (e.g. SHA-256) of the token instead.
-4. **Refresh Token Rotation:** Refresh token exchange issues a new access token but reuses the existing refresh token until expiry or manual logout. Implementing Refresh Token Rotation (issuing a new refresh token and invalidating the old one on each refresh) would provide reuse detection.
-5. **WebSocket Token via Query Parameter:** While handshake `auth.token` is the primary transport, `socket.ts` falls back to `query.token`. Query parameters can inadvertently appear in server access logs and proxy history.
-6. **Worker Concurrency is Process-Local:** The `concurrency: 3` setting is local to each worker instance. Running multiple worker containers multiplies total concurrent cooking jobs accordingly.
-7. **At-Least-Once Delivery:** BullMQ operates under at-least-once delivery semantics. Handlers must maintain idempotent status transitions (e.g. conditional `updateMany` checking current status) to prevent double-processing.
-8. **Offline WebSocket Events are Dropped:** Socket.io emits events over ephemeral pub/sub channels. If a student is offline or disconnected when their order transitions to `READY`, the event is dropped. Clients must query `GET /api/orders/my` on reconnect.
-9. **Pagination Gaps:** `GET /api/orders` supports pagination (`page`, `limit`), but `GET /api/menu` and `GET /api/orders/my` return all matching records without pagination. For large mess deployments, cursor or offset pagination should be added.
-10. **Idempotency Keys on Orders:** `POST /api/orders` does not accept a client-generated `Idempotency-Key` header. If a mobile client experiences a network timeout after the database commits but before the response arrives, a client retry could place a duplicate order.
-11. **Cloud Database Latency:** Measured latency: median 279.94 ms cache miss per request from my laptop in India to Neon us-east-2 (N=30). Network roundtrips to remote cloud databases affect interactive transaction hold times under high load compared to co-located or local database instances.
-12. **CI Tests Run on Local Postgres, Not Neon:** The GitHub Actions workflow executes against local `postgres:16-alpine` service containers. While this validates Prisma schema, migrations, and transactional integrity, it does not validate Neon's proprietary WebSocket serverless proxy in CI.
+3. **Refresh Token Rotation:** Refresh token exchange issues a new access token but reuses the existing refresh token until expiry or manual logout. Implementing Refresh Token Rotation (issuing a new refresh token and invalidating the old one on each refresh) would provide reuse detection.
+4. **Worker Concurrency is Process-Local:** The `concurrency: 3` setting is local to each worker instance. Running multiple worker containers multiplies total concurrent cooking jobs accordingly.
+5. **At-Least-Once Delivery:** BullMQ operates under at-least-once delivery semantics. Handlers must maintain idempotent status transitions (e.g. conditional `updateMany` checking current status) to prevent double-processing.
+6. **Offline WebSocket Events are Dropped:** Socket.io emits events over ephemeral pub/sub channels. If a student is offline or disconnected when their order transitions to `READY`, the event is dropped. Clients must query `GET /api/orders/my` on reconnect.
+7. **Pagination Gaps:** `GET /api/orders` supports pagination (`page`, `limit`), but `GET /api/menu` and `GET /api/orders/my` return all matching records without pagination. For large mess deployments, cursor or offset pagination should be added.
+8. **Idempotency Keys on Orders:** `POST /api/orders` does not accept a client-generated `Idempotency-Key` header. If a mobile client experiences a network timeout after the database commits but before the response arrives, a client retry could place a duplicate order.
+9. **Cloud Database Latency:** Measured latency: median 279.94 ms cache miss per request from my laptop in India to Neon us-east-2 (N=30). Network roundtrips to remote cloud databases affect interactive transaction hold times under high load compared to co-located or local database instances.
+10. **CI Tests Run on Local Postgres, Not Neon:** The GitHub Actions workflow executes against local `postgres:16-alpine` service containers. While this validates Prisma schema, migrations, and transactional integrity, it does not validate Neon's proprietary WebSocket serverless proxy in CI.
 
 ---
 
