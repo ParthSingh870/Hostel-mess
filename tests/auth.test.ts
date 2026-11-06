@@ -173,4 +173,109 @@ describe('Auth Flow - Register, Login, Refresh, Logout, and Token Guard', () => 
         expect(res.status).toBe(401);
         expect(res.body.message).toBe('Unauthorized: Invalid or expired token');
     });
+
+    it('RefreshToken database column stores SHA-256 hex hash (64 chars) and not the raw JWT', async () => {
+        const crypto = await import('crypto');
+        const email = generateUniqueEmail('hash-storage');
+        const password = 'password123';
+
+        const regRes = await request(app).post('/api/auth/register').send({
+            name: 'Hash Storage User',
+            email,
+            password,
+        });
+        const userId = regRes.body.data.id;
+        createdUserIds.push(userId);
+
+        const loginRes = await request(app).post('/api/auth/login').send({ email, password });
+        const rawRefreshToken = loginRes.body.data.refreshToken;
+
+        // Query the database directly for the persisted token record
+        const tokenRecord = await prisma.refreshToken.findFirst({
+            where: { userId },
+        });
+
+        expect(tokenRecord).toBeDefined();
+        const storedToken = tokenRecord?.token as string;
+
+        // 1. Column must be a 64-character lowercase hexadecimal string
+        expect(storedToken).toHaveLength(64);
+        expect(storedToken).toMatch(/^[a-f0-9]{64}$/);
+
+        // 2. Column must match the SHA-256 hash of the issued JWT
+        const expectedHash = crypto.createHash('sha256').update(rawRefreshToken).digest('hex');
+        expect(storedToken).toBe(expectedHash);
+
+        // 3. Column must NOT be the raw JWT (does not start with 'eyJ')
+        expect(storedToken.startsWith('eyJ')).toBe(false);
+        expect(storedToken).not.toBe(rawRefreshToken);
+    });
+
+    it('rejects WebSocket handshake when token is provided via query parameter only', async () => {
+        const { createServer } = await import('http');
+        const { initSocketServer } = await import('../src/realtime/socket.js');
+        const { io: ioClient } = await import('socket.io-client');
+        const { generateAccessToken } = await import('../src/services/auth.service.js');
+
+        // Create a test HTTP server on an ephemeral port
+        const server = createServer(app);
+        const socketServer = initSocketServer(server);
+
+        await new Promise<void>((resolve) => server.listen(0, resolve));
+        const address = server.address();
+        const port = typeof address === 'object' && address ? address.port : 0;
+        const serverUrl = `http://127.0.0.1:${port}`;
+
+        const validToken = generateAccessToken('ws-query-test-user', 'STUDENT');
+
+        try {
+            // Attempt to connect passing token ONLY in query string (no auth object)
+            const queryError = await new Promise<string>((resolve) => {
+                const client = ioClient(serverUrl, {
+                    query: { token: validToken },
+                    transports: ['websocket'],
+                    reconnection: false,
+                    timeout: 2000,
+                });
+
+                client.on('connect', () => {
+                    client.disconnect();
+                    resolve('UNEXPECTED_CONNECTED');
+                });
+
+                client.on('connect_error', (err) => {
+                    resolve(err.message);
+                    client.disconnect();
+                });
+            });
+
+            // Must be rejected with Token missing because query fallback was removed
+            expect(queryError).toBe('Authentication error: Token missing');
+
+            // Conversely, verify that passing token in handshake auth object succeeds
+            const authClient = ioClient(serverUrl, {
+                auth: { token: validToken },
+                transports: ['websocket'],
+                reconnection: false,
+                timeout: 2000,
+            });
+
+            const authResult = await new Promise<string>((resolve) => {
+                authClient.on('connect', () => {
+                    authClient.disconnect();
+                    resolve('CONNECTED');
+                });
+
+                authClient.on('connect_error', (err) => {
+                    resolve(`ERROR: ${err.message}`);
+                    authClient.disconnect();
+                });
+            });
+
+            expect(authResult).toBe('CONNECTED');
+        } finally {
+            socketServer.close();
+            await new Promise<void>((resolve) => server.close(() => resolve()));
+        }
+    });
 });
